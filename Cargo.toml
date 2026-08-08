@@ -10,3 +10,14 @@ path = "src/lib.rs"
 
 [dependencies]
 num-bigint = "0.4"
+
+[dev-dependencies]
+criterion = { version = "0.8", features = ["html_reports"] }
+
+[[bench]]
+name = "partition"
+harness = false
+
+[[bench]]
+name = "reference_codec"
+harness = false
