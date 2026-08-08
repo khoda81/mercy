@@ -31,3 +31,8 @@ jobs:
 
       - name: Test
         run: cargo test --all-targets --all-features
+
+      # Hosted runners are intentionally not used for performance numbers.
+      # This only ensures the Criterion harnesses keep compiling.
+      - name: Compile benchmarks
+        run: cargo bench --all-features --no-run
