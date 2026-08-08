@@ -41,27 +41,32 @@ is CPU-pinned.
 - [ ] Bring the isolated Docker benchmark runner online.
 - [ ] Record toolchain, CPU topology, governor/frequency state and thermal state
       with benchmark artifacts where practical.
-- [ ] Benchmark multiple query ranks instead of repeatedly querying only rank
+- [x] Benchmark multiple query ranks instead of repeatedly querying only rank
       127.
-- [ ] Add pseudo-random query sequences to exercise realistic branch behavior.
-- [ ] Add fixed-rank microbenchmarks for the nth-set-bit primitive at ranks
+- [x] Add pseudo-random query sequences to exercise realistic branch behavior.
+- [x] Add fixed-rank microbenchmarks for the nth-set-bit primitive at ranks
       0, 1, 4, 8, 16, 31 and 63.
 
 ## Phase 2 — 512-bit primitive shootout
 
 Keep the literal implementations as baselines. Add candidates beside them and
-let Zen 2 decide.
+let Zen 2 decide. Candidate implementations live in the benchmark harness until
+measurements justify moving one into library code.
 
 ### Select
 
-- [ ] Baseline: repeated `word &= word - 1` / `BLSR` plus `TZCNT`.
-- [ ] BMI2: `PDEP(1 << n, word)` plus `TZCNT`.
-- [ ] Small LUT: bytewise select using a ~2 KiB `SELECT8[256][8]` table.
+- [x] Baseline benchmark: repeated `word &= word - 1` / `BLSR` plus `TZCNT`.
+- [x] BMI2 benchmark: `PDEP(1 << n, word)` plus `TZCNT`.
+- [x] Small-LUT benchmark: bytewise select using a ~2 KiB `SELECT8[256][8]`
+      table.
 - [ ] Broadword/SWAR select, only if the simpler candidates leave worthwhile
       headroom.
-- [ ] Compare isolated nth-bit cost as a function of rank.
-- [ ] Compare full `select_symbol` / `select_byte` across ranks
+- [x] Compare isolated nth-bit cost as a function of rank.
+- [x] Compare full `select_symbol` / `select_byte` across ranks
       0, 31, 63, 127, 191 and 255.
+
+The PDEP benchmark is runtime-gated on x86-64 BMI2 support. The canonical Ryzen
+5 4600H supports the intended path; hosted CI only needs to compile the bench.
 
 ### Rank
 
