@@ -36,5 +36,6 @@ RUN curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs \
     && rustup component add rustfmt clippy
 
 COPY --chown=runner:runner runner/entrypoint.sh /home/runner/entrypoint.sh
+RUN chmod +x /home/runner/entrypoint.sh
 
 ENTRYPOINT ["/home/runner/entrypoint.sh"]
