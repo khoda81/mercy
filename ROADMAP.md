@@ -59,6 +59,8 @@ measurements justify moving one into library code.
 - [x] BMI2 benchmark: `PDEP(1 << n, word)` plus `TZCNT`.
 - [x] Small-LUT benchmark: bytewise select using a ~2 KiB `SELECT8[256][8]`
       table.
+- [x] Binary-popcount descent benchmark: repeatedly choose the low/high half
+      using `POPCNT`, narrowing 64 -> 32 -> 16 -> 8 -> 4 -> 2 -> 1 bits.
 - [ ] Broadword/SWAR select, only if the simpler candidates leave worthwhile
       headroom.
 - [x] Compare isolated nth-bit cost as a function of rank.
