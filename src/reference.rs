@@ -282,7 +282,8 @@ impl ReferenceModel {
                 }
             }
 
-            let (byte, child) = chosen.expect("a point inside an interval belongs to one byte child");
+            let (byte, child) =
+                chosen.expect("a point inside an interval belongs to one byte child");
             self.byte_output.push(byte);
             self.byte_interval = child;
         }
@@ -304,7 +305,8 @@ impl ConstraintModel for ReferenceModel {
     }
 
     fn push_byte(&mut self, byte: u8) -> &[Self::Symbol] {
-        self.try_push_byte(byte).expect("inconsistent byte constraint")
+        self.try_push_byte(byte)
+            .expect("inconsistent byte constraint")
     }
 
     fn partition(&self) -> BoundaryMerge {
@@ -384,7 +386,10 @@ mod tests {
         weights[256] = 10;
 
         let mut encoder = ReferenceModel::new(weights).unwrap();
-        assert!(encoder.try_push_symbol(ByteSymbol::Byte(b'a')).unwrap().is_empty());
+        assert!(encoder
+            .try_push_symbol(ByteSymbol::Byte(b'a'))
+            .unwrap()
+            .is_empty());
 
         let encoded = compress(weights, b"aaaaaaaaaaaaaaaaaaaaaaaa").unwrap();
         let mut decoder = ReferenceModel::new(weights).unwrap();
