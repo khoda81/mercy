@@ -20,14 +20,18 @@ RUN apt-get update \
         util-linux \
     && rm -rf /var/lib/apt/lists/*
 
-RUN useradd --create-home --uid 1000 --shell /bin/bash runner
+# Ubuntu 24.04 already reserves UID 1000 in the base image. The runner lives
+# entirely in Docker named volumes, so it does not need to share a numeric UID
+# with the host; let useradd choose a free one.
+RUN useradd --create-home --shell /bin/bash runner
 
 WORKDIR /home/runner/actions-runner
 
 RUN curl -fsSL \
       "https://github.com/actions/runner/releases/download/v${RUNNER_VERSION}/actions-runner-linux-x64-${RUNNER_VERSION}.tar.gz" \
       | tar xz \
-    && ./bin/installdependencies.sh
+    && ./bin/installdependencies.sh \
+    && chown -R runner:runner /home/runner/actions-runner
 
 USER runner
 
