@@ -1,0 +1,42 @@
+services:
+  mercy-bench-runner:
+    build:
+      context: ..
+      dockerfile: runner/Dockerfile
+      args:
+        RUNNER_VERSION: ${RUNNER_VERSION:-2.334.0}
+    container_name: mercy-bench-runner
+    hostname: mercy-bench-runner
+    restart: unless-stopped
+    init: true
+
+    environment:
+      RUNNER_URL: https://github.com/khoda81/mercy
+      RUNNER_TOKEN: ${RUNNER_TOKEN:-}
+      RUNNER_NAME: ${RUNNER_NAME:-mercy-4600h}
+      RUNNER_LABELS: mercy-bench
+
+    # Pin the whole runner to one logical CPU. This avoids benchmark migration
+    # between cores and guarantees the benchmark itself is single-threaded at
+    # the scheduler level. Override with BENCH_CPU if desired.
+    cpuset: ${BENCH_CPU:-4}
+
+    mem_limit: ${BENCH_MEMORY:-4g}
+    pids_limit: 256
+
+    cap_drop:
+      - ALL
+    security_opt:
+      - no-new-privileges:true
+
+    # No host filesystem mounts and deliberately no Docker socket.
+    # The named volume persists runner registration, checkout, and Cargo build
+    # artifacts without exposing the host home directory.
+    volumes:
+      - mercy-runner-data:/home/runner/actions-runner
+
+    tmpfs:
+      - /tmp:rw,nosuid,nodev,size=512m
+
+volumes:
+  mercy-runner-data:
