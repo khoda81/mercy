@@ -150,9 +150,11 @@ fn bench_query_ranks(c: &mut Criterion) {
     group.throughput(Throughput::Elements(1));
 
     for rank in PARTITION_RANKS {
-        group.bench_with_input(BenchmarkId::new("select_symbol", rank), &rank, |b, &rank| {
-            b.iter(|| partition.select_symbol(black_box(rank)))
-        });
+        group.bench_with_input(
+            BenchmarkId::new("select_symbol", rank),
+            &rank,
+            |b, &rank| b.iter(|| partition.select_symbol(black_box(rank))),
+        );
         group.bench_with_input(BenchmarkId::new("select_byte", rank), &rank, |b, &rank| {
             b.iter(|| partition.select_byte(black_box(rank)))
         });
