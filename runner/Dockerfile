@@ -1,6 +1,7 @@
 FROM ubuntu:24.04
 
-ARG RUNNER_VERSION=2.334.0
+ARG RUNNER_VERSION=2.336.0
+ARG RUNNER_SHA256=04cf0be1aff4c3ec3554466c39124ca250e3effd8873bb7e8d68535aa9505d5d
 
 ENV DEBIAN_FRONTEND=noninteractive
 ENV PATH=/home/runner/.cargo/bin:${PATH}
@@ -27,15 +28,29 @@ RUN useradd --create-home --shell /bin/bash runner
 
 WORKDIR /home/runner/actions-runner
 
-RUN curl -fsSL \
+# GitHub release assets occasionally fail DNS/connection establishment on poor
+# links. Retry transient failures instead of throwing away an otherwise cached
+# build, and verify the exact hash GitHub publishes before extracting anything.
+RUN curl -fL \
+      --retry 20 \
+      --retry-all-errors \
+      --retry-delay 5 \
+      --connect-timeout 30 \
+      -o /tmp/actions-runner.tar.gz \
       "https://github.com/actions/runner/releases/download/v${RUNNER_VERSION}/actions-runner-linux-x64-${RUNNER_VERSION}.tar.gz" \
-      | tar xz \
+    && echo "${RUNNER_SHA256}  /tmp/actions-runner.tar.gz" | sha256sum -c - \
+    && tar xzf /tmp/actions-runner.tar.gz \
+    && rm /tmp/actions-runner.tar.gz \
     && ./bin/installdependencies.sh \
     && chown -R runner:runner /home/runner/actions-runner
 
 USER runner
 
-RUN curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs \
+RUN curl --proto '=https' --tlsv1.2 -sSf \
+      --retry 20 \
+      --retry-all-errors \
+      --retry-delay 5 \
+      https://sh.rustup.rs \
       | sh -s -- -y --profile minimal --default-toolchain stable \
     && rustup component add rustfmt clippy
 
