@@ -73,6 +73,28 @@ fn select_nth_set_bit_lut(mut word: u64, mut n: usize) -> usize {
     unreachable!("rank must name a set bit")
 }
 
+#[inline]
+fn select_nth_set_bit_binary(mut word: u64, mut n: usize) -> usize {
+    debug_assert!(n < word.count_ones() as usize);
+
+    let mut base = 0usize;
+    let mut width = 32usize;
+    while width != 0 {
+        let low_mask = (1u64 << width) - 1;
+        let low = word & low_mask;
+        let low_count = low.count_ones() as usize;
+        if n < low_count {
+            word = low;
+        } else {
+            n -= low_count;
+            word >>= width;
+            base += width;
+        }
+        width >>= 1;
+    }
+    base
+}
+
 #[cfg(target_arch = "x86_64")]
 #[target_feature(enable = "bmi2")]
 unsafe fn select_nth_set_bit_pdep(word: u64, n: usize) -> usize {
@@ -200,6 +222,7 @@ fn bench_select_primitive(c: &mut Criterion) {
     for rank in 0..64 {
         let expected = select_nth_set_bit_loop(word, rank);
         assert_eq!(select_nth_set_bit_lut(word, rank), expected);
+        assert_eq!(select_nth_set_bit_binary(word, rank), expected);
 
         #[cfg(target_arch = "x86_64")]
         if std::is_x86_feature_detected!("bmi2") {
@@ -218,6 +241,10 @@ fn bench_select_primitive(c: &mut Criterion) {
 
         group.bench_with_input(BenchmarkId::new("lut8", rank), &rank, |b, &rank| {
             b.iter(|| select_nth_set_bit_lut(black_box(word), black_box(rank)))
+        });
+
+        group.bench_with_input(BenchmarkId::new("binary", rank), &rank, |b, &rank| {
+            b.iter(|| select_nth_set_bit_binary(black_box(word), black_box(rank)))
         });
 
         #[cfg(target_arch = "x86_64")]
