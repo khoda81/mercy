@@ -4,7 +4,7 @@ services:
       context: ..
       dockerfile: runner/Dockerfile
       args:
-        RUNNER_VERSION: ${RUNNER_VERSION:-2.334.0}
+        RUNNER_VERSION: ${RUNNER_VERSION:-2.336.0}
     container_name: mercy-bench-runner
     hostname: mercy-bench-runner
     restart: unless-stopped
