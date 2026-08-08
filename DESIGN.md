@@ -13,6 +13,37 @@ far. Constraining either stream may force a prefix on the other.
 This avoids requiring the model ABI to expose floating-point probabilities,
 integer arithmetic-coder ranges, or a dedicated encoder/decoder model API.
 
+## Constraint semantics
+
+The two stream operations are dual:
+
+```text
+push_symbol(symbol) -> longest newly-forced byte prefix
+push_byte(byte)      -> longest newly-forced symbol prefix
+```
+
+Neither direction has a fixed rate. A common symbol may force no bytes yet; a
+single byte may force several symbols. This variable-rate behavior is the point:
+it lets information cross symbol/byte boundaries instead of rounding every
+symbol to an integral number of transport digits.
+
+The exact reference implementation makes this literal with two rational
+intervals. Let `S` be the code points compatible with known source symbols and
+`B` the code points compatible with known stream bytes.
+
+- `push_symbol` narrows `S`, then emits radix-256 children while `S` lies wholly
+  inside one child of `B`.
+- `push_byte` narrows `B`, then emits source symbols while `B` lies wholly inside
+  one symbol child of `S`.
+
+In ordinary encoding the useful invariant is `S subset B`; in ordinary decoding
+it is `B subset S`. The same state machinery supports both constraint directions.
+
+EOS leaves a finite nonempty final symbol interval. Finalization chooses its
+midpoint and emits radix-256 digits until the selected byte cylinder is wholly
+inside that interval. The fast implementation does not need to use midpoints or
+big rationals; this is just the reference semantics.
+
 ## Why the merged boundary bitvector works
 
 At a single radix-256 view, there are two sorted boundary sequences:
@@ -40,9 +71,14 @@ For event ordinal `k`:
 - `select1(k)` = merged position of symbol boundary k;
 - `select0(k)` = merged position of byte cut k.
 
-These operations are standard succinct-bitvector primitives. On only 512 bits,
-a simple eight-word implementation is likely sufficient; SIMD/BMI2 lookup paths
-can be benchmarked later rather than assumed.
+These operations are standard succinct-bitvector primitives. The current code is
+intentionally literal and therefore a useful compiler target to inspect. The hot
+path will need dedicated benchmarking: broadword select, small lookup tables,
+BMI2 (`pdep`/`pext` where useful), SIMD summaries, or a tiny auxiliary index may
+all beat the current per-set-bit loop depending on the target CPU.
+
+The representation itself should stay fixed while implementations are free to
+optimize how they query it.
 
 ## Exact ties
 
