@@ -135,14 +135,7 @@ rank/select implementation are all intentionally obvious.
 
 ## Roadmap
 
-1. keep the exact reference transducer as the behavioral oracle;
-2. add randomized/property roundtrip tests and compare future implementations
-   against the oracle;
-3. implement recursive `partition()` refinement;
-4. implement a fixed-width arithmetic/range transducer behind the same API;
-5. optimize the 512-bit hot paths (`rank`/`select`, boundary construction,
-   child lookup), benchmarking broadword tricks, lookup tables, BMI2 and SIMD
-   rather than assuming which wins;
-6. benchmark the raw 64-byte bitvector ABI against conventional CDF/range arrays;
-7. implement generic product-of-experts composition at partition/refinement
-   level.
+The detailed correctness, optimization, benchmark, transducer and model-algebra
+plan lives in [`ROADMAP.md`](ROADMAP.md). In particular, optimized variants stay
+beside the literal implementation until the canonical Ryzen 5 4600H benchmark
+runner decides which implementation wins.
