@@ -1,0 +1,9 @@
+[package]
+name = "mercy"
+version = "0.1.0"
+edition = "2021"
+description = "POC: a 512-bit interleaving of symbol and radix-256 boundaries for codec/model composition"
+license = "MIT OR Apache-2.0"
+
+[lib]
+path = "src/lib.rs"
