@@ -1,10 +1,16 @@
 name: Benchmarks
 
 on:
+  push:
+    branches: [main]
   workflow_dispatch:
 
 permissions:
   contents: read
+
+concurrency:
+  group: mercy-bench
+  cancel-in-progress: true
 
 jobs:
   benchmark:
