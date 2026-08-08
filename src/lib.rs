@@ -11,17 +11,16 @@
 //! and 256 zero-bits.
 
 mod partition;
+mod reference;
 
 pub use partition::{BoundaryMerge, BuildError};
+pub use reference::{compress, decompress, ByteSymbol, ReferenceError, ReferenceModel};
 
-/// Conceptual streaming interface discussed alongside the POC.
+/// A streaming model viewed as a bidirectional constraint transducer.
 ///
-/// Both methods *constrain* one side of a relation between a symbol stream
-/// and a byte stream. Their returned slices are the longest prefixes on the
-/// opposite side that became forced by the new constraint.
-///
-/// This trait is intentionally not implemented by the POC yet; the first
-/// milestone is validating the 64-byte partition representation independently.
+/// Both methods constrain one side of a relation between a symbol stream and a
+/// byte stream. Their returned slices are the longest prefixes on the opposite
+/// side that became forced by the new constraint.
 pub trait ConstraintModel {
     type Symbol: Copy;
 
