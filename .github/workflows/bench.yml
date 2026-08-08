@@ -1,0 +1,38 @@
+name: Benchmarks
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  benchmark:
+    # Intentionally does not fall back to GitHub-hosted hardware. Performance
+    # numbers are only meaningful on the canonical target machine.
+    runs-on: [self-hosted, linux, x64, mercy-bench]
+    env:
+      RUSTFLAGS: -C target-cpu=native
+      CARGO_TERM_COLOR: never
+
+    steps:
+      - uses: actions/checkout@v5
+
+      - name: Toolchain info
+        run: |
+          rustc --version --verbose
+          cargo --version
+          uname -a
+          lscpu
+
+      - name: Partition benchmarks
+        shell: bash
+        run: |
+          set -o pipefail
+          cargo bench --bench partition 2>&1 | tee benchmark-partition.txt
+
+      - name: Reference codec benchmarks
+        shell: bash
+        run: |
+          set -o pipefail
+          cargo bench --bench reference_codec 2>&1 | tee benchmark-reference-codec.txt
