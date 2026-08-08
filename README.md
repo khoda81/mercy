@@ -104,12 +104,45 @@ Decompression repeatedly calls `push_byte` and concatenates returned symbols.
 The 64-byte `partition()` view is optional introspection intended for model
 algebra (PoE, mixtures, visualization, etc.).
 
-## Status
+## Exact reference codec
 
-This first POC only implements and tests the 512-bit boundary merge. Next useful
-milestones are:
+`ReferenceModel` is deliberately the least clever implementation possible. It
+keeps two arbitrary-precision rational intervals:
 
-1. reference interval/arithmetic implementation of `ConstraintModel`;
-2. recursive `partition()` refinement;
-3. generic product-of-experts composition at partition/refinement level;
-4. benchmark raw 64-byte bitvectors vs conventional CDF arrays.
+- the set of code points compatible with the symbol constraints;
+- the set compatible with the byte constraints.
+
+Pushing a symbol narrows the first interval. Every radix-256 child that becomes
+inevitable is emitted as a byte. Pushing a byte narrows the second interval and
+symmetrically emits every source symbol that becomes inevitable.
+
+After EOS, `try_finish()` follows the midpoint of the final symbol interval until
+the chosen byte cylinder is entirely inside it. This gives a finite canonical
+code without changing the streaming interface.
+
+The helpers below exercise the complete path:
+
+```rust
+let weights = [1u64; 257];
+let encoded = mercy::compress(weights, b"hello mercy")?;
+let decoded = mercy::decompress(weights, &encoded)?;
+assert_eq!(decoded, b"hello mercy");
+```
+
+This implementation is a **correctness oracle**, not a performance target.
+Big integers, linear scans over 256/257 children, and the current literal
+rank/select implementation are all intentionally obvious.
+
+## Roadmap
+
+1. keep the exact reference transducer as the behavioral oracle;
+2. add randomized/property roundtrip tests and compare future implementations
+   against the oracle;
+3. implement recursive `partition()` refinement;
+4. implement a fixed-width arithmetic/range transducer behind the same API;
+5. optimize the 512-bit hot paths (`rank`/`select`, boundary construction,
+   child lookup), benchmarking broadword tricks, lookup tables, BMI2 and SIMD
+   rather than assuming which wins;
+6. benchmark the raw 64-byte bitvector ABI against conventional CDF/range arrays;
+7. implement generic product-of-experts composition at partition/refinement
+   level.
