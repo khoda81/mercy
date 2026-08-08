@@ -1,8 +1,5 @@
 FROM ubuntu:24.04
 
-ARG RUNNER_VERSION=2.336.0
-ARG RUNNER_SHA256=04cf0be1aff4c3ec3554466c39124ca250e3effd8873bb7e8d68535aa9505d5d
-
 ENV DEBIAN_FRONTEND=noninteractive
 ENV PATH=/home/runner/.cargo/bin:${PATH}
 
@@ -28,17 +25,23 @@ RUN useradd --create-home --shell /bin/bash runner
 
 WORKDIR /home/runner/actions-runner
 
-# GitHub release assets occasionally fail DNS/connection establishment on poor
-# links. Retry transient failures instead of throwing away an otherwise cached
-# build, and verify the exact hash GitHub publishes before extracting anything.
+# Keep the runner release and its published checksum together in the image
+# definition. They are deliberately not runtime/.env settings: changing one
+# without the other must require editing this file.
+ENV RUNNER_VERSION=2.336.0
+ENV RUNNER_SHA256=04cf0be1aff4c3ec3554466c39124ca250e3effd8873bb7e8d68535aa9505d5d
+
+# Keep downloading in its own layer. If a later verification/extraction step
+# fails, Docker can still reuse the expensive completed download.
 RUN curl -fL \
       --retry 20 \
       --retry-all-errors \
       --retry-delay 5 \
       --connect-timeout 30 \
       -o /tmp/actions-runner.tar.gz \
-      "https://github.com/actions/runner/releases/download/v${RUNNER_VERSION}/actions-runner-linux-x64-${RUNNER_VERSION}.tar.gz" \
-    && echo "${RUNNER_SHA256}  /tmp/actions-runner.tar.gz" | sha256sum -c - \
+      "https://github.com/actions/runner/releases/download/v${RUNNER_VERSION}/actions-runner-linux-x64-${RUNNER_VERSION}.tar.gz"
+
+RUN echo "${RUNNER_SHA256}  /tmp/actions-runner.tar.gz" | sha256sum -c - \
     && tar xzf /tmp/actions-runner.tar.gz \
     && rm /tmp/actions-runner.tar.gz \
     && ./bin/installdependencies.sh \
@@ -46,12 +49,17 @@ RUN curl -fL \
 
 USER runner
 
-RUN curl --proto '=https' --tlsv1.2 -sSf \
+# Download rustup first, then execute it. This way a failed curl cannot be
+# hidden by the exit status of a shell on the right-hand side of a pipeline.
+RUN curl --proto '=https' --tlsv1.2 -fL \
       --retry 20 \
       --retry-all-errors \
       --retry-delay 5 \
+      --connect-timeout 30 \
+      -o /tmp/rustup-init.sh \
       https://sh.rustup.rs \
-      | sh -s -- -y --profile minimal --default-toolchain stable \
+    && sh /tmp/rustup-init.sh -y --profile minimal --default-toolchain stable \
+    && rm /tmp/rustup-init.sh \
     && rustup component add rustfmt clippy
 
 COPY --chown=runner:runner runner/entrypoint.sh /home/runner/entrypoint.sh
