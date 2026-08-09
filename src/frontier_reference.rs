@@ -188,10 +188,7 @@ pub fn frontier_decompress(weights: [u64; SYMBOLS], input: &[u8]) -> Option<Vec<
 
     for &byte in input {
         model.push_byte(byte);
-        loop {
-            let Some(symbol_index) = model.frontier().decode().forced_symbol_strict() else {
-                break;
-            };
+        while let Some(symbol_index) = model.frontier().decode().forced_symbol_strict() {
             let symbol = symbol_from_index(symbol_index);
             model.push_symbol(symbol);
             match symbol {
@@ -208,10 +205,7 @@ fn push_forced_bytes<T>(model: &mut T, output: &mut Vec<u8>)
 where
     T: Transducer<Symbol = ByteSymbol>,
 {
-    loop {
-        let Some(byte) = model.frontier().decode().forced_byte_strict() else {
-            break;
-        };
+    while let Some(byte) = model.frontier().decode().forced_byte_strict() {
         model.push_byte(byte);
         output.push(byte);
     }
