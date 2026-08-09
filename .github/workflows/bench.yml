@@ -37,19 +37,27 @@ jobs:
           set -o pipefail
           cargo bench --bench partition 2>&1 | tee benchmark-partition.txt
 
+      - name: Upload partition benchmark results
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: mercy-partition-benchmark-results
+          path: benchmark-partition.txt
+          if-no-files-found: warn
+          retention-days: 30
+
       - name: Reference codec benchmarks
+        if: github.event_name == 'workflow_dispatch'
         shell: bash
         run: |
           set -o pipefail
           cargo bench --bench reference_codec 2>&1 | tee benchmark-reference-codec.txt
 
-      - name: Upload benchmark results
-        if: always()
+      - name: Upload reference codec benchmark results
+        if: github.event_name == 'workflow_dispatch'
         uses: actions/upload-artifact@v4
         with:
-          name: mercy-benchmark-results
-          path: |
-            benchmark-partition.txt
-            benchmark-reference-codec.txt
+          name: mercy-reference-codec-benchmark-results
+          path: benchmark-reference-codec.txt
           if-no-files-found: warn
           retention-days: 30
