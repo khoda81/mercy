@@ -168,9 +168,7 @@ impl DecodedFrontier {
         let symbol_lo = self.symbol_pos[0];
         let symbol_hi = self.symbol_pos[SYMBOL_EDGES - 1];
         (0..256)
-            .find(|&byte| {
-                symbol_lo < self.byte_pos[byte] && self.byte_pos[byte] < symbol_hi
-            })
+            .find(|&byte| symbol_lo < self.byte_pos[byte] && self.byte_pos[byte] < symbol_hi)
             .map(|byte| byte as u8)
     }
 
@@ -242,9 +240,7 @@ mod tests {
         let mut remaining_symbols = SYMBOL_EDGES;
         for (pos, event) in events.iter_mut().enumerate() {
             let remaining = FRONTIER_EVENTS - pos;
-            if remaining_symbols != 0
-                && (pos % 3 == 0 || remaining == remaining_symbols)
-            {
+            if remaining_symbols != 0 && (pos % 3 == 0 || remaining == remaining_symbols) {
                 *event = true;
                 remaining_symbols -= 1;
             }
