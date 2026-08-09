@@ -42,3 +42,14 @@ jobs:
         run: |
           set -o pipefail
           cargo bench --bench reference_codec 2>&1 | tee benchmark-reference-codec.txt
+
+      - name: Upload benchmark results
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: mercy-benchmark-results
+          path: |
+            benchmark-partition.txt
+            benchmark-reference-codec.txt
+          if-no-files-found: warn
+          retention-days: 30
