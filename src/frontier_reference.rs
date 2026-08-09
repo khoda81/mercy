@@ -73,7 +73,10 @@ impl ReferenceFrontierModel {
             cumulative[index + 1] = cumulative[index] + weight as u128;
         }
         let total = cumulative[SYMBOLS];
-        assert!(total != 0, "probability model must have non-zero total mass");
+        assert!(
+            total != 0,
+            "probability model must have non-zero total mass"
+        );
 
         Self {
             weights,
@@ -116,9 +119,8 @@ impl Transducer for ReferenceFrontierModel {
             self.symbol_interval
                 .edge(self.cumulative[index], self.total)
         });
-        let byte_edges: [Fraction; 257] = std::array::from_fn(|index| {
-            self.byte_interval.edge(index as u128, 256)
-        });
+        let byte_edges: [Fraction; 257] =
+            std::array::from_fn(|index| self.byte_interval.edge(index as u128, 256));
 
         let mut events = [false; FRONTIER_EVENTS];
         let mut symbol_i = 0usize;
@@ -297,8 +299,8 @@ mod tests {
 
     fn assert_roundtrip(weights: [u64; SYMBOLS], input: &[u8]) {
         let encoded = frontier_compress(weights, input);
-        let decoded = frontier_decompress(weights, &encoded)
-            .expect("canonical finalization must force EOS");
+        let decoded =
+            frontier_decompress(weights, &encoded).expect("canonical finalization must force EOS");
         assert_eq!(decoded, input);
 
         let ideal = ideal_bits(&weights, input);
