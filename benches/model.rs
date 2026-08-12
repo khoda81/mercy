@@ -40,12 +40,20 @@ fn bench_topology_paths(c: &mut Criterion) {
     group.warm_up_time(Duration::from_secs(1));
     group.measurement_time(Duration::from_secs(3));
 
-    for &(name, index) in &[("head", 0usize), ("middle", LLM_VOCAB / 2), ("tail", LLM_VOCAB - 1)] {
-        group.bench_with_input(BenchmarkId::new("chain_encode", name), &index, |b, &index| {
-            b.iter(|| {
-                black_box(chain.encode_index(black_box(index)).unwrap().count());
-            })
-        });
+    for &(name, index) in &[
+        ("head", 0usize),
+        ("middle", LLM_VOCAB / 2),
+        ("tail", LLM_VOCAB - 1),
+    ] {
+        group.bench_with_input(
+            BenchmarkId::new("chain_encode", name),
+            &index,
+            |b, &index| {
+                b.iter(|| {
+                    black_box(chain.encode_index(black_box(index)).unwrap().count());
+                })
+            },
+        );
         group.bench_with_input(
             BenchmarkId::new("balanced_encode", name),
             &index,
@@ -65,17 +73,15 @@ fn bench_symbol_lookup(c: &mut Criterion) {
     let topology = BalancedTree::from_weights(&weights).unwrap();
     let explicit: Vec<u32> = (0..SMALL_VOCAB as u32).collect();
 
-    let dense = BinaryDistribution::new(
-        DenseU32Symbols::new(SMALL_VOCAB as u32),
-        topology.clone(),
-    )
-    .unwrap();
+    let dense = BinaryDistribution::new(DenseU32Symbols::new(SMALL_VOCAB as u32), topology.clone())
+        .unwrap();
     let linear = BinaryDistribution::new(
         LinearSymbols::new(explicit.clone()).unwrap(),
         topology.clone(),
     )
     .unwrap();
-    let indexed = BinaryDistribution::new(IndexedSymbols::new(explicit).unwrap(), topology).unwrap();
+    let indexed =
+        BinaryDistribution::new(IndexedSymbols::new(explicit).unwrap(), topology).unwrap();
 
     let target = SMALL_VOCAB as u32 - 1;
     let mut group = c.benchmark_group("model/symbol_lookup_4k");
