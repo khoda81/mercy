@@ -399,13 +399,9 @@ impl Chain {
             suffix[i] = suffix[i + 1] + weights[i] as u128;
         }
 
-        let mut left_probabilities =
-            Vec::with_capacity(weights.len().saturating_sub(1));
+        let mut left_probabilities = Vec::with_capacity(weights.len().saturating_sub(1));
         for i in 0..weights.len().saturating_sub(1) {
-            left_probabilities.push(Frac32::from_positive_ratio(
-                weights[i] as u128,
-                suffix[i],
-            ));
+            left_probabilities.push(Frac32::from_positive_ratio(weights[i] as u128, suffix[i]));
         }
 
         Ok(Self { left_probabilities })
@@ -518,8 +514,7 @@ pub struct BalancedTree {
 impl BalancedTree {
     pub fn from_weights(weights: &[u64]) -> Result<Self, BuildError> {
         validate_weights(weights)?;
-        let mut left_probabilities =
-            Vec::with_capacity(weights.len().saturating_sub(1));
+        let mut left_probabilities = Vec::with_capacity(weights.len().saturating_sub(1));
         build_balanced(weights, &mut left_probabilities);
         Ok(Self {
             len: weights.len(),
@@ -848,8 +843,7 @@ mod tests {
     #[test]
     fn chain_encode_decode_roundtrip() {
         let topology = Chain::from_weights(&[8, 4, 2, 1]).unwrap();
-        let distribution =
-            BinaryDistribution::new(DenseU32Symbols::new(4), topology).unwrap();
+        let distribution = BinaryDistribution::new(DenseU32Symbols::new(4), topology).unwrap();
 
         for symbol in 0..4 {
             assert_eq!(decode_path(&distribution, symbol), symbol);
@@ -865,8 +859,7 @@ mod tests {
         let weights: Vec<_> = (1..=13).collect();
         let topology = BalancedTree::from_weights(&weights).unwrap();
         assert_eq!(topology.left_probabilities().len(), 12);
-        let distribution =
-            BinaryDistribution::new(DenseU32Symbols::new(13), topology).unwrap();
+        let distribution = BinaryDistribution::new(DenseU32Symbols::new(13), topology).unwrap();
 
         for symbol in 0..13 {
             assert_eq!(decode_path(&distribution, symbol), symbol);
@@ -875,9 +868,7 @@ mod tests {
         }
     }
 
-    fn probability_sum<T: Topology>(
-        distribution: &BinaryDistribution<DenseU32Symbols, T>,
-    ) -> f64 {
+    fn probability_sum<T: Topology>(distribution: &BinaryDistribution<DenseU32Symbols, T>) -> f64 {
         (0..distribution.len() as u32)
             .map(|symbol| distribution.probability(symbol).unwrap())
             .sum()
