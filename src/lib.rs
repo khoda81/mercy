@@ -9,6 +9,7 @@
 
 mod frontier;
 mod frontier_reference;
+pub mod model;
 mod partition;
 mod reference;
 
