@@ -792,7 +792,10 @@ impl<D: Distribution> Model for IidModel<D> {
 mod tests {
     use super::*;
 
-    fn decode_path<D: Distribution>(distribution: &D, symbol: D::Symbol) -> D::Symbol {
+    fn decode_path<D: Distribution>(distribution: &D, symbol: D::Symbol) -> D::Symbol
+    where
+        D::Symbol: std::fmt::Debug,
+    {
         let path: Vec<_> = distribution
             .encode(symbol)
             .expect("symbol must be encodable")
