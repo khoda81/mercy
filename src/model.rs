@@ -529,7 +529,7 @@ impl BalancedTree {
 
 #[inline]
 fn split_len(len: usize) -> usize {
-    (len + 1) / 2
+    len.div_ceil(2)
 }
 
 fn build_balanced(weights: &[u64], probabilities: &mut Vec<Frac32>) -> u128 {
