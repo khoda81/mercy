@@ -26,22 +26,25 @@ jobs:
         run: |
           python - <<'PY'
           from pathlib import Path
-          path = Path('src/serde_model.rs')
-          text = path.read_text()
-          text = text.replace('use serde::{Deserialize, Serialize};', 'use serde::Serialize;')
-          marker = '''    #[inline]
-          pub const fn contains(self, choice: u8) -> bool {
-          '''
-          insertion = '''    #[inline]
-          pub const fn is_empty(self) -> bool {
-              false
-          }
 
-          '''
-          if marker not in text:
-              raise SystemExit('contains() marker not found')
-          text = text.replace(marker, insertion + marker, 1)
-          path.write_text(text)
+          path = Path("src/serde_model.rs")
+          lines = path.read_text().splitlines()
+          lines = [
+              "use serde::Serialize;" if line == "use serde::{Deserialize, Serialize};" else line
+              for line in lines
+          ]
+
+          needle = "    pub const fn contains(self, choice: u8) -> bool {"
+          i = lines.index(needle)
+          lines[i - 1:i - 1] = [
+              "    #[inline]",
+              "    pub const fn is_empty(self) -> bool {",
+              "        false",
+              "    }",
+              "",
+          ]
+
+          path.write_text("\n".join(lines) + "\n")
           PY
           cargo fmt --all
           rm .github/workflows/fix-serde-lints.yml
