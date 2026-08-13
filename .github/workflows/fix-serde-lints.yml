@@ -1,0 +1,52 @@
+name: Fix Serde prototype lints
+
+on:
+  push:
+    branches: [agent/serde-prediction-model]
+
+permissions:
+  contents: write
+
+jobs:
+  fix:
+    if: github.actor != 'github-actions[bot]'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          ref: agent/serde-prediction-model
+
+      - name: Install Rust stable
+        run: |
+          rustup update stable --no-self-update
+          rustup default stable
+          rustup component add rustfmt
+
+      - name: Apply fixes and commit
+        run: |
+          python - <<'PY'
+          from pathlib import Path
+          path = Path('src/serde_model.rs')
+          text = path.read_text()
+          text = text.replace('use serde::{Deserialize, Serialize};', 'use serde::Serialize;')
+          marker = '''    #[inline]
+          pub const fn contains(self, choice: u8) -> bool {
+          '''
+          insertion = '''    #[inline]
+          pub const fn is_empty(self) -> bool {
+              false
+          }
+
+          '''
+          if marker not in text:
+              raise SystemExit('contains() marker not found')
+          text = text.replace(marker, insertion + marker, 1)
+          path.write_text(text)
+          PY
+          cargo fmt --all
+          rm .github/workflows/fix-serde-lints.yml
+          git config user.name github-actions[bot]
+          git config user.email 41898282+github-actions[bot]@users.noreply.github.com
+          git add -A
+          git commit -m "fix serde prototype lints"
+          git push
