@@ -132,11 +132,7 @@ impl<P: Prediction> Categorical<P> {
 
 /// Entropy-encoder seam. A real range/arithmetic coder implements this trait.
 pub trait ChoiceEncoder {
-    fn encode<P: Prediction>(
-        &mut self,
-        choice: u8,
-        distribution: &Categorical<P>,
-    ) -> Result<()>;
+    fn encode<P: Prediction>(&mut self, choice: u8, distribution: &Categorical<P>) -> Result<()>;
 }
 
 /// Entropy-decoder seam. It must return one valid index in `distribution`.
@@ -163,7 +159,11 @@ impl fmt::Display for Error {
         match self {
             Self::Message(message) => f.write_str(message),
             Self::ZeroMass { choices } => {
-                write!(f, "prediction assigns zero mass to all {} choices", choices.len())
+                write!(
+                    f,
+                    "prediction assigns zero mass to all {} choices",
+                    choices.len()
+                )
             }
             Self::InvalidChoice { choice, choices } => {
                 write!(f, "choice {choice} is outside 0..{}", choices.len())
@@ -172,7 +172,9 @@ impl fmt::Display for Error {
                 write!(f, "choice {choice} has zero probability")
             }
             Self::UnknownLength(kind) => write!(f, "{kind} must report its length"),
-            Self::LengthOverflow => f.write_str("length does not fit the Mercy wire representation"),
+            Self::LengthOverflow => {
+                f.write_str("length does not fit the Mercy wire representation")
+            }
             Self::InvalidUtf8 => f.write_str("decoded bytes are not valid UTF-8"),
             Self::InvalidChar(value) => write!(f, "decoded invalid char ordinal {value}"),
             Self::InvalidEnumVariant(value) => write!(f, "decoded invalid enum variant {value}"),
@@ -417,11 +419,7 @@ impl<'s, 'a, T: ?Sized, M: Model<T>, C: ChoiceEncoder> ser::Serializer
         Ok(self)
     }
 
-    fn serialize_struct(
-        self,
-        _name: &'static str,
-        _len: usize,
-    ) -> Result<Self::SerializeStruct> {
+    fn serialize_struct(self, _name: &'static str, _len: usize) -> Result<Self::SerializeStruct> {
         Ok(self)
     }
 
@@ -514,9 +512,7 @@ impl<T: ?Sized, M: Model<T>, C: ChoiceEncoder> SerializeMap for &mut Serializer<
     }
 }
 
-impl<T: ?Sized, M: Model<T>, C: ChoiceEncoder> SerializeStruct
-    for &mut Serializer<'_, T, M, C>
-{
+impl<T: ?Sized, M: Model<T>, C: ChoiceEncoder> SerializeStruct for &mut Serializer<'_, T, M, C> {
     type Ok = ();
     type Error = Error;
 
@@ -762,7 +758,9 @@ impl<'de, 's, 'a, T: ?Sized, M: Model<T>, C: ChoiceDecoder> de::Deserializer<'de
     fn deserialize_string<V: Visitor<'de>>(self, visitor: V) -> Result<V::Value> {
         let len = usize::try_from(self.length()?).map_err(|_| Error::LengthOverflow)?;
         let mut bytes = Vec::new();
-        bytes.try_reserve_exact(len).map_err(|_| Error::LengthOverflow)?;
+        bytes
+            .try_reserve_exact(len)
+            .map_err(|_| Error::LengthOverflow)?;
         for _ in 0..len {
             bytes.push(self.byte()?);
         }
@@ -777,7 +775,9 @@ impl<'de, 's, 'a, T: ?Sized, M: Model<T>, C: ChoiceDecoder> de::Deserializer<'de
     fn deserialize_byte_buf<V: Visitor<'de>>(self, visitor: V) -> Result<V::Value> {
         let len = usize::try_from(self.length()?).map_err(|_| Error::LengthOverflow)?;
         let mut bytes = Vec::new();
-        bytes.try_reserve_exact(len).map_err(|_| Error::LengthOverflow)?;
+        bytes
+            .try_reserve_exact(len)
+            .map_err(|_| Error::LengthOverflow)?;
         for _ in 0..len {
             bytes.push(self.byte()?);
         }
@@ -894,8 +894,7 @@ mod tests {
         fn weight(&self, choice: u8) -> u64 {
             // Always positive, but strongly history-dependent so the test checks
             // that encoder and decoder traverse identical model states.
-            1 + (self.0 ^ (choice as u64).wrapping_mul(0x9e37_79b9))
-                .rotate_left(choice as u32 & 31)
+            1 + (self.0 ^ (choice as u64).wrapping_mul(0x9e37_79b9)).rotate_left(choice as u32 & 31)
                 % 10_000
         }
     }
