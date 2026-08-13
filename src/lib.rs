@@ -1,16 +1,14 @@
-//! `mercy`: a tiny proof-of-concept for a boundary-first codec/model ABI.
+//! `mercy`: experimental abstractions for probabilistic, typed compression.
 //!
-//! The original hot-path experiment is [`BoundaryMerge`]: exactly 512 bits
-//! containing the sorted merge of 256 symbol boundaries and 256 radix-256 byte
-//! cuts. [`Frontier512`] is the semantic/reference companion for the purified
-//! independently-walkable transducer API; it packs the complete 515-edge local
-//! frontier (including current endpoints) into the same 64 bytes by enumerative
-//! coding.
+//! [`serde_model`] is the current design direction: Serde supplies the shared
+//! structural program while one stateful prediction model drives both entropy
+//! encoding and entropy decoding.
 
 mod frontier;
 mod frontier_reference;
 mod partition;
 mod reference;
+pub mod serde_model;
 
 pub use frontier::{DecodedFrontier, Frontier512};
 pub use frontier_reference::{frontier_compress, frontier_decompress, ReferenceFrontierModel};
@@ -23,10 +21,6 @@ pub use reference::{compress, decompress, ByteSymbol, ReferenceError, ReferenceM
 /// push method performs work on the opposite stream. `frontier()` is the only
 /// observation surface: it describes how the *next* symbol-child edges and
 /// radix-256 byte-child edges interleave under the current pair of prefixes.
-///
-/// A normal entropy-coding driver simply walks the opposite side whenever the
-/// frontier says one child has become forced, but that synchronization policy is
-/// intentionally outside the transducer itself.
 pub trait Transducer {
     type Symbol: Copy;
 
@@ -37,10 +31,6 @@ pub trait Transducer {
 
 /// Earlier convenience API where each push also walks and returns the longest
 /// forced prefix on the opposite side.
-///
-/// Kept while the new purified [`Transducer`] semantics are proven against the
-/// existing exact reference coder. New composition work should target
-/// `Transducer` rather than adding more behavior here.
 pub trait ConstraintModel {
     type Symbol: Copy;
 
