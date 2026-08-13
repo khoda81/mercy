@@ -4,8 +4,10 @@
 //! representation that deterministically lowers to the next exact byte
 //! categorical, and the same model drives both entropy encoding and decoding.
 
+pub mod coder;
 pub mod serde_model;
 
+pub use coder::{CoderError, FractionalU16, RangeDecoder, RangeEncoder};
 pub use serde_model::{
     decode, encode, ByteCategorical, ChoiceDecoder, ChoiceEncoder, IntoByteCategorical, Model,
 };
