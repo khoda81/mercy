@@ -7,7 +7,7 @@
 pub mod coder;
 pub mod serde_model;
 
-pub use coder::{CoderError, FractionalU16, RangeDecoder, RangeEncoder};
+pub use coder::{FractionalU16, RangeDecoder, RangeEncoder};
 pub use serde_model::{
     decode, encode, ByteCategorical, ChoiceDecoder, ChoiceEncoder, IntoByteCategorical, Model,
 };
