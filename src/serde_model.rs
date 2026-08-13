@@ -9,7 +9,7 @@ use serde::ser::{
     self, SerializeMap, SerializeSeq, SerializeStruct, SerializeStructVariant, SerializeTuple,
     SerializeTupleStruct, SerializeTupleVariant,
 };
-use serde::{Deserialize, Serialize};
+use serde::Serialize;
 
 /// A non-negative, not-necessarily-normalized prediction over byte-sized choices.
 ///
@@ -61,6 +61,11 @@ impl Choices {
     #[inline]
     pub const fn len(self) -> u16 {
         self.0
+    }
+
+    #[inline]
+    pub const fn is_empty(self) -> bool {
+        false
     }
 
     #[inline]
