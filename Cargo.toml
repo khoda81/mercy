@@ -10,6 +10,7 @@ path = "src/lib.rs"
 
 [dependencies]
 num-bigint = "0.4"
+serde = { version = "1", features = ["derive"] }
 
 [dev-dependencies]
 criterion = { version = "0.8", features = ["html_reports"] }
