@@ -2,23 +2,11 @@
 name = "mercy"
 version = "0.1.0"
 edition = "2021"
-description = "Experimental type-safe probabilistic serialization and compression abstractions"
+description = "Type-safe probabilistic serialization and compression"
 license = "MIT OR Apache-2.0"
 
 [lib]
 path = "src/lib.rs"
 
 [dependencies]
-num-bigint = "0.4"
 serde = { version = "1", features = ["derive"] }
-
-[dev-dependencies]
-criterion = { version = "0.8", features = ["html_reports"] }
-
-[[bench]]
-name = "partition"
-harness = false
-
-[[bench]]
-name = "reference_codec"
-harness = false

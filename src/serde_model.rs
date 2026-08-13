@@ -11,19 +11,111 @@ use serde::ser::{
 };
 use serde::Serialize;
 
-/// A non-negative, not-necessarily-normalized prediction over byte-sized choices.
+/// The exact byte distribution consumed by Mercy's entropy coder.
 ///
-/// Implementations only provide masses. Mercy performs normalization over the
-/// choice set selected by the Serde format, so model implementations cannot
-/// accidentally violate the sum-to-one invariant.
-pub trait Prediction {
-    fn weight(&self, choice: u8) -> u64;
+/// Its representation is intentionally private. Public prediction types may use
+/// logits, fixed-point probabilities, mixtures, products, or anything else; they
+/// participate in Mercy by lowering deterministically to this type.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct ByteCategorical {
+    weights: [u64; 256],
+    total: u128,
 }
 
-impl<P: Prediction + ?Sized> Prediction for &P {
+impl ByteCategorical {
+    /// Construct an exact categorical distribution from integer frequencies.
+    ///
+    /// Multiplying every weight by the same positive constant produces the same
+    /// mathematical distribution. Zero-weight bytes are impossible outcomes.
+    pub fn from_weights(weights: [u64; 256]) -> Result<Self> {
+        let total = weights.iter().map(|&weight| weight as u128).sum();
+        if total == 0 {
+            return Err(Error::ZeroMass {
+                choices: Choices::BYTE,
+            });
+        }
+        Ok(Self { weights, total })
+    }
+
+    /// Uniform distribution over all 256 byte values.
+    pub fn uniform() -> Self {
+        Self {
+            weights: [1; 256],
+            total: 256,
+        }
+    }
+
+    /// Exact two-outcome distribution on bytes 0 and 1.
+    pub fn binary(zero: u64, one: u64) -> Result<Self> {
+        let mut weights = [0; 256];
+        weights[0] = zero;
+        weights[1] = one;
+        Self::from_weights(weights)
+    }
+
     #[inline]
-    fn weight(&self, choice: u8) -> u64 {
-        (**self).weight(choice)
+    pub const fn total(&self) -> u128 {
+        self.total
+    }
+
+    #[inline]
+    pub const fn weight(&self, choice: u8) -> u64 {
+        self.weights[choice as usize]
+    }
+
+    pub fn interval(&self, choice: u8) -> (u128, u128) {
+        let index = choice as usize;
+        let low = self.weights[..index]
+            .iter()
+            .map(|&weight| weight as u128)
+            .sum::<u128>();
+        (low, low + self.weights[index] as u128)
+    }
+
+    #[inline]
+    pub fn probability(&self, choice: u8) -> f64 {
+        self.weight(choice) as f64 / self.total as f64
+    }
+
+    /// Condition on the Serde decision domain without approximation.
+    ///
+    /// Mercy currently uses contiguous domains `0..n`; invalid byte values are
+    /// assigned exact zero mass and the remaining integer frequencies are left
+    /// untouched.
+    fn restricted(&self, choices: Choices) -> Result<Self> {
+        let mut weights = self.weights;
+        for weight in &mut weights[choices.len() as usize..] {
+            *weight = 0;
+        }
+        let total = weights.iter().map(|&weight| weight as u128).sum();
+        if total == 0 {
+            return Err(Error::ZeroMass { choices });
+        }
+        Ok(Self { weights, total })
+    }
+}
+
+/// Lossless lowering from a user-facing prediction representation to Mercy's
+/// canonical byte distribution.
+///
+/// This trait deliberately does not expose raw probabilities as the model ABI.
+/// A prediction type owns its representation and decides how it maps to the
+/// exact byte frequencies used by the coder.
+pub trait IntoByteCategorical {
+    fn byte_categorical(&self) -> ByteCategorical;
+}
+
+impl IntoByteCategorical for ByteCategorical {
+    #[inline]
+    fn byte_categorical(&self) -> ByteCategorical {
+        self.clone()
+    }
+}
+
+impl<P: IntoByteCategorical + ?Sized> IntoByteCategorical for &P {
+    #[inline]
+    fn byte_categorical(&self) -> ByteCategorical {
+        (**self).byte_categorical()
     }
 }
 
@@ -32,7 +124,7 @@ impl<P: Prediction + ?Sized> Prediction for &P {
 /// All contextual state lives in the model. `predict` is observational;
 /// `observe` advances the model after the chosen byte-sized decision is known.
 pub trait Model<T: ?Sized> {
-    type Prediction<'a>: Prediction
+    type Prediction<'a>: IntoByteCategorical
     where
         Self: 'a;
 
@@ -74,75 +166,14 @@ impl Choices {
     }
 }
 
-/// A normalized categorical distribution over one [`Choices`] domain.
-///
-/// The model supplies only non-negative masses. Construction computes the total
-/// over the valid choices and rejects the sole invalid representation: zero
-/// total mass. Therefore every constructed value is normalized by definition.
-pub struct Categorical<P> {
-    prediction: P,
-    choices: Choices,
-    total: u128,
-}
-
-impl<P: Prediction> Categorical<P> {
-    pub fn new(prediction: P, choices: Choices) -> Result<Self> {
-        let total = (0..choices.len())
-            .map(|choice| prediction.weight(choice as u8) as u128)
-            .sum();
-        if total == 0 {
-            return Err(Error::ZeroMass { choices });
-        }
-        Ok(Self {
-            prediction,
-            choices,
-            total,
-        })
-    }
-
-    #[inline]
-    pub const fn choices(&self) -> Choices {
-        self.choices
-    }
-
-    #[inline]
-    pub const fn total(&self) -> u128 {
-        self.total
-    }
-
-    #[inline]
-    pub fn weight(&self, choice: u8) -> Option<u64> {
-        self.choices
-            .contains(choice)
-            .then(|| self.prediction.weight(choice))
-    }
-
-    pub fn interval(&self, choice: u8) -> Option<(u128, u128)> {
-        if !self.choices.contains(choice) {
-            return None;
-        }
-        let low = (0..choice as u16)
-            .map(|candidate| self.prediction.weight(candidate as u8) as u128)
-            .sum::<u128>();
-        let high = low + self.prediction.weight(choice) as u128;
-        Some((low, high))
-    }
-
-    #[inline]
-    pub fn probability(&self, choice: u8) -> Option<f64> {
-        self.weight(choice)
-            .map(|weight| weight as f64 / self.total as f64)
-    }
-}
-
 /// Entropy-encoder seam. A real range/arithmetic coder implements this trait.
 pub trait ChoiceEncoder {
-    fn encode<P: Prediction>(&mut self, choice: u8, distribution: &Categorical<P>) -> Result<()>;
+    fn encode(&mut self, choice: u8, distribution: &ByteCategorical) -> Result<()>;
 }
 
-/// Entropy-decoder seam. It must return one valid index in `distribution`.
+/// Entropy-decoder seam. It must return one byte from `distribution`.
 pub trait ChoiceDecoder {
-    fn decode<P: Prediction>(&mut self, distribution: &Categorical<P>) -> Result<u8>;
+    fn decode(&mut self, distribution: &ByteCategorical) -> Result<u8>;
 }
 
 #[derive(Debug)]
@@ -249,13 +280,14 @@ impl<T: ?Sized, M: Model<T>, C: ChoiceEncoder> Serializer<'_, T, M, C> {
         if !choices.contains(choice) {
             return Err(Error::InvalidChoice { choice, choices });
         }
-        let prediction = self.model.predict();
-        let distribution = Categorical::new(prediction, choices)?;
-        if distribution.weight(choice) == Some(0) {
+        let distribution = {
+            let prediction = self.model.predict();
+            prediction.byte_categorical().restricted(choices)?
+        };
+        if distribution.weight(choice) == 0 {
             return Err(Error::ZeroProbabilityChoice(choice));
         }
         self.coder.encode(choice, &distribution)?;
-        drop(distribution);
         self.model.observe(choice);
         Ok(())
     }
@@ -571,16 +603,17 @@ impl<'a, T: ?Sized, M, C> Deserializer<'a, T, M, C> {
 
 impl<T: ?Sized, M: Model<T>, C: ChoiceDecoder> Deserializer<'_, T, M, C> {
     fn choose(&mut self, choices: Choices) -> Result<u8> {
-        let prediction = self.model.predict();
-        let distribution = Categorical::new(prediction, choices)?;
+        let distribution = {
+            let prediction = self.model.predict();
+            prediction.byte_categorical().restricted(choices)?
+        };
         let choice = self.coder.decode(&distribution)?;
         if !choices.contains(choice) {
             return Err(Error::InvalidChoice { choice, choices });
         }
-        if distribution.weight(choice) == Some(0) {
+        if distribution.weight(choice) == 0 {
             return Err(Error::ZeroProbabilityChoice(choice));
         }
-        drop(distribution);
         self.model.observe(choice);
         Ok(choice)
     }
@@ -895,12 +928,17 @@ mod tests {
     #[derive(Clone, Copy)]
     struct HistoryPrediction(u64);
 
-    impl Prediction for HistoryPrediction {
-        fn weight(&self, choice: u8) -> u64 {
-            // Always positive, but strongly history-dependent so the test checks
-            // that encoder and decoder traverse identical model states.
-            1 + (self.0 ^ (choice as u64).wrapping_mul(0x9e37_79b9)).rotate_left(choice as u32 & 31)
-                % 10_000
+    impl IntoByteCategorical for HistoryPrediction {
+        fn byte_categorical(&self) -> ByteCategorical {
+            let weights = std::array::from_fn(|choice| {
+                let choice = choice as u8;
+                // Always positive, but strongly history-dependent so the test
+                // checks that encoder and decoder traverse identical model states.
+                1 + (self.0 ^ (choice as u64).wrapping_mul(0x9e37_79b9))
+                    .rotate_left(choice as u32 & 31)
+                    % 10_000
+            });
+            ByteCategorical::from_weights(weights).unwrap()
         }
     }
 
@@ -927,8 +965,7 @@ mod tests {
     #[derive(Clone)]
     struct TraceStep {
         choice: u8,
-        choices: Choices,
-        weights: Vec<u64>,
+        weights: [u64; 256],
     }
 
     #[derive(Default)]
@@ -937,17 +974,10 @@ mod tests {
     }
 
     impl ChoiceEncoder for TraceEncoder {
-        fn encode<P: Prediction>(
-            &mut self,
-            choice: u8,
-            distribution: &Categorical<P>,
-        ) -> Result<()> {
+        fn encode(&mut self, choice: u8, distribution: &ByteCategorical) -> Result<()> {
             self.steps.push(TraceStep {
                 choice,
-                choices: distribution.choices(),
-                weights: (0..distribution.choices().len())
-                    .map(|candidate| distribution.weight(candidate as u8).unwrap())
-                    .collect(),
+                weights: std::array::from_fn(|candidate| distribution.weight(candidate as u8)),
             });
             Ok(())
         }
@@ -959,13 +989,10 @@ mod tests {
     }
 
     impl ChoiceDecoder for TraceDecoder<'_> {
-        fn decode<P: Prediction>(&mut self, distribution: &Categorical<P>) -> Result<u8> {
+        fn decode(&mut self, distribution: &ByteCategorical) -> Result<u8> {
             let step = &self.steps[self.cursor];
             self.cursor += 1;
-            assert_eq!(distribution.choices(), step.choices);
-            let weights: Vec<_> = (0..distribution.choices().len())
-                .map(|candidate| distribution.weight(candidate as u8).unwrap())
-                .collect();
+            let weights = std::array::from_fn(|candidate| distribution.weight(candidate as u8));
             assert_eq!(weights, step.weights);
             Ok(step.choice)
         }
@@ -1016,18 +1043,15 @@ mod tests {
     }
 
     #[test]
-    fn categorical_normalizes_only_over_valid_choices() {
-        struct Weights;
-        impl Prediction for Weights {
-            fn weight(&self, choice: u8) -> u64 {
-                choice as u64 + 1
-            }
-        }
-
-        let distribution = Categorical::new(Weights, Choices::BINARY).unwrap();
+    fn byte_categorical_restricts_exactly_to_valid_choices() {
+        let weights = std::array::from_fn(|choice| choice as u64 + 1);
+        let distribution = ByteCategorical::from_weights(weights)
+            .unwrap()
+            .restricted(Choices::BINARY)
+            .unwrap();
         assert_eq!(distribution.total(), 3);
-        assert_eq!(distribution.interval(0), Some((0, 1)));
-        assert_eq!(distribution.interval(1), Some((1, 3)));
-        assert_eq!(distribution.probability(2), None);
+        assert_eq!(distribution.interval(0), (0, 1));
+        assert_eq!(distribution.interval(1), (1, 3));
+        assert_eq!(distribution.weight(2), 0);
     }
 }
