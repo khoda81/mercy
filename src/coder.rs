@@ -142,7 +142,7 @@ impl RangeEncoder {
         }
 
         self.cache_size += 1;
-        self.low = (low as u64) << 8;
+        self.low = (low << 8) as u64;
     }
 }
 
