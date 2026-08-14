@@ -148,12 +148,7 @@ impl OutputBytes {
                 self.state = len;
             } else {
                 self.bytes[1..].fill(repeated);
-                self.state = len
-                    | if repeated == 0xff {
-                        TAG
-                    } else {
-                        0
-                    };
+                self.state = len | if repeated == 0xff { TAG } else { 0 };
             }
 
             return;
@@ -403,11 +398,10 @@ fn workload(events: usize) -> (Vec<u8>, Vec<u16>, Vec<u16>) {
         seed
     };
 
-    let q16: Vec<u16> = (0..events).map(|_| 0x8000 | (random() as u16 & 0x7fff)).collect();
-    let q17 = q16
-        .iter()
-        .map(|&raw| (raw - 0x8000) << 1)
+    let q16: Vec<u16> = (0..events)
+        .map(|_| 0x8000 | (random() as u16 & 0x7fff))
         .collect();
+    let q17 = q16.iter().map(|&raw| (raw - 0x8000) << 1).collect();
 
     // Initialization and every event can pull at most three bytes, so this
     // guarantees the benchmark never reaches implicit zero-extended EOF.
@@ -443,21 +437,11 @@ fn coder_round_trip(c: &mut Criterion<EventTime>) {
     group.throughput(Throughput::Elements(EVENTS as u64));
 
     group.bench_function("q16", |b| {
-        b.iter(|| {
-            black_box(transcode::<Q16>(
-                black_box(&source),
-                black_box(&q16),
-            ))
-        });
+        b.iter(|| black_box(transcode::<Q16>(black_box(&source), black_box(&q16))));
     });
 
     group.bench_function("q17", |b| {
-        b.iter(|| {
-            black_box(transcode::<Q17>(
-                black_box(&source),
-                black_box(&q17),
-            ))
-        });
+        b.iter(|| black_box(transcode::<Q17>(black_box(&source), black_box(&q17))));
     });
 
     group.finish();
