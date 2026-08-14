@@ -180,6 +180,7 @@ fn output_bytes_compresses_long_runs() {
     }
 }
 
+#[cfg(test)]
 fn random_events() -> Vec<(FractionalU16, bool)> {
     let mut seed = 0x1234_5678_u64;
 
@@ -199,6 +200,7 @@ fn random_events() -> Vec<(FractionalU16, bool)> {
         .collect()
 }
 
+#[cfg(test)]
 fn encode_production(events: &[(FractionalU16, bool)]) -> Vec<u8> {
     let mut encoder = RangeEncoder::new();
     let mut bytes = Vec::new();
