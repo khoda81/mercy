@@ -32,98 +32,85 @@ fn append_byte(value: u32, byte: u8) -> u32 {
     u32::from_be_bytes([a, b, c, byte])
 }
 
-#[derive(Clone, Copy)]
-struct Run {
-    first: u8,
-    repeated: u8,
-    repeated_count: usize,
-}
-
-impl Run {
-    const EMPTY: Self = Self {
-        first: 0,
-        repeated: 0,
-        repeated_count: 0,
-    };
-}
-
 /// Lazily emitted bytes.
 ///
 /// A pathological
 ///
-///     42 ff ff ff ff ... ff
+/// ```text
+/// 42 ff ff ff ff ... ff
+/// ```
 ///
 /// does not allocate that run. We store its length and generate it while
 /// iterating.
 #[must_use]
 pub struct OutputBytes {
-    runs: [Run; 4],
-    len: usize,
-    run: usize,
-    offset: usize,
+    bytes: [u8; 4],
+    remaining: isize,
 }
 
 impl OutputBytes {
-    const fn new() -> Self {
-        Self {
-            runs: [Run::EMPTY; 4],
-            len: 0,
-            run: 0,
-            offset: 0,
-        }
-    }
-
-    #[inline(always)]
-    fn push(&mut self, first: u8, repeated: u8, repeated_count: usize) {
-        debug_assert!(self.len < self.runs.len());
-
-        self.runs[self.len] = Run {
-            first,
-            repeated,
-            repeated_count,
+    pub fn new(first: u8, repeated: u8, count: usize) -> Self {
+        let mut this = Self {
+            bytes: [0; 4],
+            remaining: 0,
         };
-        self.len += 1;
+
+        debug_assert!(this.remaining == 0);
+        debug_assert!(repeated == 0 || repeated == 0xff);
+
+        let len = count + 1;
+
+        this.bytes[0] = first;
+
+        if len <= 4 {
+            this.bytes[1..len].fill(repeated);
+            this.remaining = len as isize;
+        } else {
+            this.bytes[1..].fill(repeated);
+            this.remaining = if repeated == 0xff {
+                len as isize
+            } else {
+                -(len as isize)
+            };
+        }
+
+        this
     }
 }
 
 impl Iterator for OutputBytes {
     type Item = u8;
 
-    #[inline]
     fn next(&mut self) -> Option<u8> {
-        if self.run == self.len {
+        let remaining = self.remaining.unsigned_abs();
+
+        if remaining == 0 {
             return None;
         }
 
-        let run = self.runs[self.run];
+        let [first, a, b, c] = self.bytes;
 
-        if self.offset == 0 {
-            if run.repeated_count == 0 {
-                self.run += 1;
-            } else {
-                self.offset = 1;
-            }
+        if remaining > 4 {
+            self.bytes[0] = if self.remaining > 0 { 0xff } else { 0x00 };
 
-            return Some(run.first);
-        }
-
-        let byte = run.repeated;
-
-        if self.offset == run.repeated_count {
-            self.run += 1;
-            self.offset = 0;
+            self.remaining += if self.remaining > 0 { -1 } else { 1 };
         } else {
-            self.offset += 1;
+            self.bytes = [a, b, c, 0];
+
+            // Once we're in the literal tail, the sign has no meaning.
+            self.remaining = (remaining - 1) as isize;
         }
 
-        Some(byte)
+        Some(first)
     }
 }
 
 /// The lower bound is represented as:
 ///
-///     low[0] | ff ff ... ff | low[1..4]
-///              ^ ff_count
+/// ```text
+/// low[0] | ff ff ... ff | low[1..4]
+///          ^ ff_count
+/// ```
 ///
 /// `low[0]` is the unresolved significant byte and `low[1..4]` is the
 /// live 24-bit arithmetic suffix.
@@ -159,9 +146,7 @@ impl RangeEncoder {
 
     pub fn put(&mut self, p: FractionalU16, lower: bool) -> OutputBytes {
         let mut output = OutputBytes::new();
-
-        let range = self.denominator as u64 + 1;
-        let split = ((range * p.raw() as u64) >> PROBABILITY_BITS) as u32;
+        let split = split(self.denominator + 1, p);
 
         if lower {
             debug_assert!(split != 0);
@@ -170,6 +155,7 @@ impl RangeEncoder {
             let [old_head, ..] = self.low.to_be_bytes();
 
             self.low = self.low.wrapping_add(split);
+            self.denominator -= split;
             let [head, ..] = self.low.to_be_bytes();
 
             // The 24-bit suffix carried through the implicit FF run.
@@ -184,6 +170,7 @@ impl RangeEncoder {
 
                     let [_, a, b, c] = self.low.to_be_bytes();
                     self.low = u32::from_be_bytes([0, a, b, c]);
+                    self.pending = 0;
                 }
             }
         }
@@ -329,7 +316,17 @@ fn round_trip_random() {
 
     let mut decoder = RangeDecoder::new(&bytes);
 
-    for &(p, expected) in &events {
-        assert_eq!(decoder.test(p), expected);
+    for (i, &(p, expected)) in events.iter().enumerate() {
+        let numerator = decoder.numerator;
+        let denominator = decoder.denominator;
+
+        let got = decoder.test(p);
+
+        assert_eq!(
+            got,
+            expected,
+            "event {i}, p={}, numerator={numerator:#08x}, denominator={denominator:#08x}",
+            p.raw(),
+        );
     }
 }
