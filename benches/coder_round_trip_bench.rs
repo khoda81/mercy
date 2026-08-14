@@ -39,12 +39,7 @@ impl Measurement for EventTime {
 }
 
 impl EventFormatter {
-    fn events_per_second(
-        &self,
-        events: f64,
-        typical: f64,
-        values: &mut [f64],
-    ) -> &'static str {
+    fn events_per_second(&self, events: f64, typical: f64, values: &mut [f64]) -> &'static str {
         let events_per_second = events * 1e9 / typical;
         let (scale, unit) = if events_per_second < 1e3 {
             (1.0, "event/s")
@@ -63,12 +58,7 @@ impl EventFormatter {
         unit
     }
 
-    fn bytes_per_second(
-        &self,
-        bytes: f64,
-        typical: f64,
-        values: &mut [f64],
-    ) -> &'static str {
+    fn bytes_per_second(&self, bytes: f64, typical: f64, values: &mut [f64]) -> &'static str {
         let bytes_per_second = bytes * 1e9 / typical;
         let (scale, unit) = if bytes_per_second < 1024.0 {
             (1.0, "B/s")
@@ -140,9 +130,7 @@ impl ValueFormatter for EventFormatter {
         values: &mut [f64],
     ) -> &'static str {
         match *throughput {
-            Throughput::Elements(events) => {
-                self.events_per_second(events as f64, typical, values)
-            }
+            Throughput::Elements(events) => self.events_per_second(events as f64, typical, values),
             Throughput::ElementsAndBytes { elements, .. } => {
                 self.events_per_second(elements as f64, typical, values)
             }
@@ -274,7 +262,10 @@ fn coder_round_trip(c: &mut Criterion<EventTime>) {
     assert_eq!(q16_bytes, production);
     assert_eq!(range_shift_bytes, production);
     assert_eq!(branchless_bytes, production);
-    assert_eq!(decode_production(&production, &q17_probabilities), production_choices);
+    assert_eq!(
+        decode_production(&production, &q17_probabilities),
+        production_choices
+    );
 
     eprintln!(
         "matched workload: {EVENTS} events -> {} canonical bytes ({:.4} bits/event)",
