@@ -2,6 +2,7 @@ use std::hint::select_unpredictable;
 
 use super::{split, FractionalU16, OutputBytes, FULL_RANGE, RANGE_TOP};
 
+#[derive(Clone, Copy)]
 pub struct RangeEncoder {
     low: u32,
     range: u32,
@@ -53,25 +54,23 @@ impl RangeEncoder {
 
     #[inline(always)]
     fn renormalize(&mut self, output: &mut OutputBytes) {
-        for _ in 0..3 {
-            if self.range <= RANGE_TOP {
-                let head = (self.low >> 24) as u8;
-                let next = (self.low >> 16) as u8;
+        while self.range <= RANGE_TOP {
+            let head = (self.low >> 24) as u8;
+            let next = (self.low >> 16) as u8;
 
-                if self.pending == 0 {
-                    self.low <<= 8;
-                    self.pending = 1;
-                } else if next == 0xff {
-                    self.low = (self.low & 0xff00_0000) | ((self.low << 8) & 0x00ff_ff00);
-                    self.pending += 1;
-                } else {
-                    output.push(head, 0xff, self.pending - 1);
-                    self.low <<= 8;
-                    self.pending = 1;
-                }
-
-                self.range <<= 8;
+            if self.pending == 0 {
+                self.low <<= 8;
+                self.pending = 1;
+            } else if next == 0xff {
+                self.low = (self.low & 0xff00_0000) | ((self.low << 8) & 0x00ff_ff00);
+                self.pending += 1;
+            } else {
+                output.push(head, 0xff, self.pending - 1);
+                self.low <<= 8;
+                self.pending = 1;
             }
+
+            self.range <<= 8;
         }
     }
 
@@ -93,7 +92,7 @@ impl RangeEncoder {
 pub struct RangeDecoder<'a> {
     numerator: u32,
     range: u32,
-    input: &'a [u8],
+    pub input: &'a [u8],
 }
 
 impl<'a> RangeDecoder<'a> {
@@ -127,11 +126,9 @@ impl<'a> RangeDecoder<'a> {
 
     #[inline(always)]
     fn renormalize(&mut self) {
-        for _ in 0..3 {
-            if self.range <= RANGE_TOP {
-                self.range <<= 8;
-                self.numerator = (self.numerator << 8) | self.read_byte() as u32;
-            }
+        while self.range <= RANGE_TOP {
+            self.range <<= 8;
+            self.numerator = (self.numerator << 8) | self.read_byte() as u32;
         }
     }
 

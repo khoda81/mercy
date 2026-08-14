@@ -8,6 +8,7 @@ pub trait Grid {
     fn split(range: u32, p: Self::Probability) -> u32;
 }
 
+#[derive(Clone, Copy)]
 pub struct BaselineEncoder<G: Grid> {
     low: u32,
     denominator: u32,
