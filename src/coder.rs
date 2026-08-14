@@ -152,6 +152,10 @@ pub mod implementations;
 #[doc(hidden)]
 pub mod legacy;
 
+/// Actual-range candidate with forced cross-crate inlining.
+#[doc(hidden)]
+pub mod range_shift_inline;
+
 // Q17 with direct radix shifts is the production implementation while we benchmark candidates.
 pub use implementations::q17::{RangeDecoder, RangeEncoder};
 
@@ -240,30 +244,37 @@ fn implementation_candidates_match_production() {
     let mut legacy_bytes = Vec::new();
     let mut range_encoder = range_shift::RangeEncoder::new();
     let mut range_bytes = Vec::new();
+    let mut inline_encoder = range_shift_inline::RangeEncoder::new();
+    let mut inline_bytes = Vec::new();
     let mut branchless_encoder = branchless::RangeEncoder::new();
     let mut branchless_bytes = Vec::new();
 
     for &(p, lower) in &events {
         legacy_bytes.extend(legacy_encoder.put(p, lower));
         range_bytes.extend(range_encoder.put(p, lower));
+        inline_bytes.extend(inline_encoder.put(p, lower));
         branchless_bytes.extend(branchless_encoder.put(p, lower));
     }
 
     legacy_bytes.extend(legacy_encoder.finish());
     range_bytes.extend(range_encoder.finish());
+    inline_bytes.extend(inline_encoder.finish());
     branchless_bytes.extend(branchless_encoder.finish());
 
     assert_eq!(legacy_bytes, expected);
     assert_eq!(range_bytes, expected);
+    assert_eq!(inline_bytes, expected);
     assert_eq!(branchless_bytes, expected);
 
     let mut legacy_decoder = legacy::RangeDecoder::new(&legacy_bytes);
     let mut range_decoder = range_shift::RangeDecoder::new(&range_bytes);
+    let mut inline_decoder = range_shift_inline::RangeDecoder::new(&inline_bytes);
     let mut branchless_decoder = branchless::RangeDecoder::new(&branchless_bytes);
 
     for &(p, expected) in &events {
         assert_eq!(legacy_decoder.test(p), expected);
         assert_eq!(range_decoder.test(p), expected);
+        assert_eq!(inline_decoder.test(p), expected);
         assert_eq!(branchless_decoder.test(p), expected);
     }
 }
