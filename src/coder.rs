@@ -34,14 +34,10 @@ fn append_byte(value: u32, byte: u8) -> u32 {
 
 /// Lazily emitted bytes.
 ///
-/// A pathological
-///
-/// ```text
-/// 42 ff ff ff ff ... ff
-/// ```
-///
-/// does not allocate that run. We store its length and generate it while
-/// iterating.
+/// At most one run can be arbitrarily long. When more than four bytes remain,
+/// `bytes[0]` is the first byte, `bytes[1..]` are the final three bytes, and
+/// the sign of `remaining` selects the omitted middle byte: positive for
+/// `0xff`, negative for `0x00`.
 #[must_use]
 pub struct OutputBytes {
     bytes: [u8; 4],
@@ -49,32 +45,65 @@ pub struct OutputBytes {
 }
 
 impl OutputBytes {
-    pub fn new(first: u8, repeated: u8, count: usize) -> Self {
-        let mut this = Self {
+    const fn new() -> Self {
+        Self {
             bytes: [0; 4],
             remaining: 0,
-        };
+        }
+    }
 
-        debug_assert!(this.remaining == 0);
+    fn push(&mut self, first: u8, repeated: u8, repeated_count: usize) {
         debug_assert!(repeated == 0 || repeated == 0xff);
 
-        let len = count + 1;
+        if self.remaining == 0 {
+            let len = repeated_count + 1;
+            self.bytes[0] = first;
 
-        this.bytes[0] = first;
-
-        if len <= 4 {
-            this.bytes[1..len].fill(repeated);
-            this.remaining = len as isize;
-        } else {
-            this.bytes[1..].fill(repeated);
-            this.remaining = if repeated == 0xff {
-                len as isize
+            if len <= self.bytes.len() {
+                self.bytes[1..len].fill(repeated);
+                self.remaining = len as isize;
             } else {
-                -(len as isize)
-            };
+                self.bytes[1..].fill(repeated);
+                self.remaining = if repeated == 0xff {
+                    len as isize
+                } else {
+                    -(len as isize)
+                };
+            }
+
+            return;
         }
 
-        this
+        // After the first emission, at most three literal bytes can still be
+        // produced by the remaining renormalization steps / final flush.
+        debug_assert!(repeated_count <= 2);
+
+        self.push_byte(first);
+
+        for _ in 0..repeated_count {
+            self.push_byte(repeated);
+        }
+    }
+
+    fn push_byte(&mut self, byte: u8) {
+        let remaining = self.remaining.unsigned_abs();
+
+        if remaining < self.bytes.len() {
+            self.bytes[remaining] = byte;
+            self.remaining = (remaining + 1) as isize;
+            return;
+        }
+
+        let [first, a, b, c] = self.bytes;
+
+        if remaining == self.bytes.len() {
+            debug_assert!(a == 0 || a == 0xff);
+            self.remaining = if a == 0xff { 5 } else { -5 };
+        } else {
+            self.remaining += if self.remaining > 0 { 1 } else { -1 };
+        }
+
+        self.bytes = [first, b, c, byte];
     }
 }
 
@@ -90,14 +119,11 @@ impl Iterator for OutputBytes {
 
         let [first, a, b, c] = self.bytes;
 
-        if remaining > 4 {
+        if remaining > self.bytes.len() {
             self.bytes[0] = if self.remaining > 0 { 0xff } else { 0x00 };
-
             self.remaining += if self.remaining > 0 { -1 } else { 1 };
         } else {
             self.bytes = [a, b, c, 0];
-
-            // Once we're in the literal tail, the sign has no meaning.
             self.remaining = (remaining - 1) as isize;
         }
 
@@ -281,6 +307,22 @@ impl<'a> RangeDecoder<'a> {
 
         self.input = rest;
         *byte
+    }
+}
+
+#[test]
+fn output_bytes_compresses_long_runs() {
+    for repeated in [0x00, 0xff] {
+        let mut output = OutputBytes::new();
+        output.push(0x42, repeated, 100);
+        output.push(0x17, 0xff, 0);
+        output.push(0x93, 0xff, 0);
+
+        let bytes: Vec<_> = output.collect();
+
+        assert_eq!(bytes[0], 0x42);
+        assert_eq!(&bytes[1..101], &[repeated; 100]);
+        assert_eq!(&bytes[101..], &[0x17, 0x93]);
     }
 }
 
