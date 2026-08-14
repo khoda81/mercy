@@ -76,7 +76,12 @@ impl OutputBytes {
                 self.state = len;
             } else {
                 self.bytes[1..].fill(repeated);
-                self.state = len | if repeated == 0xff { OUTPUT_REPEAT_TAG } else { 0 };
+                self.state = len
+                    | if repeated == 0xff {
+                        OUTPUT_REPEAT_TAG
+                    } else {
+                        0
+                    };
             }
 
             return;
