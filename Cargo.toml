@@ -15,9 +15,5 @@ serde = { version = "1", features = ["derive"] }
 criterion = "0.8.2"
 
 [[bench]]
-name = "output_bytes_bench"
-harness = false
-
-[[bench]]
 name = "coder_round_trip_bench"
 harness = false
