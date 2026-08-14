@@ -45,6 +45,80 @@ impl Measurement for EventTime {
     }
 }
 
+impl EventFormatter {
+    fn events_per_second(
+        &self,
+        events: f64,
+        typical: f64,
+        values: &mut [f64],
+    ) -> &'static str {
+        let events_per_second = events * 1e9 / typical;
+        let (scale, unit) = if events_per_second < 1e3 {
+            (1.0, "event/s")
+        } else if events_per_second < 1e6 {
+            (1e3, "Kevent/s")
+        } else if events_per_second < 1e9 {
+            (1e6, "Mevent/s")
+        } else {
+            (1e9, "Gevent/s")
+        };
+
+        for value in values {
+            *value = events * 1e9 / *value / scale;
+        }
+
+        unit
+    }
+
+    fn bytes_per_second(
+        &self,
+        bytes: f64,
+        typical: f64,
+        values: &mut [f64],
+    ) -> &'static str {
+        let bytes_per_second = bytes * 1e9 / typical;
+        let (scale, unit) = if bytes_per_second < 1024.0 {
+            (1.0, "B/s")
+        } else if bytes_per_second < 1024.0 * 1024.0 {
+            (1024.0, "KiB/s")
+        } else if bytes_per_second < 1024.0 * 1024.0 * 1024.0 {
+            (1024.0 * 1024.0, "MiB/s")
+        } else {
+            (1024.0 * 1024.0 * 1024.0, "GiB/s")
+        };
+
+        for value in values {
+            *value = bytes * 1e9 / *value / scale;
+        }
+
+        unit
+    }
+
+    fn decimal_bytes_per_second(
+        &self,
+        bytes: f64,
+        typical: f64,
+        values: &mut [f64],
+    ) -> &'static str {
+        let bytes_per_second = bytes * 1e9 / typical;
+        let (scale, unit) = if bytes_per_second < 1e3 {
+            (1.0, "B/s")
+        } else if bytes_per_second < 1e6 {
+            (1e3, "KB/s")
+        } else if bytes_per_second < 1e9 {
+            (1e6, "MB/s")
+        } else {
+            (1e9, "GB/s")
+        };
+
+        for value in values {
+            *value = bytes * 1e9 / *value / scale;
+        }
+
+        unit
+    }
+}
+
 impl ValueFormatter for EventFormatter {
     fn scale_values(&self, typical: f64, values: &mut [f64]) -> &'static str {
         let (factor, unit) = if typical < 1.0 {
@@ -72,28 +146,21 @@ impl ValueFormatter for EventFormatter {
         throughput: &Throughput,
         values: &mut [f64],
     ) -> &'static str {
-        let events = match *throughput {
-            Throughput::Elements(events) => events as f64,
-            Throughput::ElementsAndBytes { elements, .. } => elements as f64,
-            _ => unreachable!("this benchmark only reports events"),
-        };
-
-        let events_per_second = events * 1e9 / typical;
-        let (scale, unit) = if events_per_second < 1e3 {
-            (1.0, "event/s")
-        } else if events_per_second < 1e6 {
-            (1e3, "Kevent/s")
-        } else if events_per_second < 1e9 {
-            (1e6, "Mevent/s")
-        } else {
-            (1e9, "Gevent/s")
-        };
-
-        for value in values {
-            *value = events * 1e9 / *value / scale;
+        match *throughput {
+            Throughput::Elements(events) => {
+                self.events_per_second(events as f64, typical, values)
+            }
+            Throughput::ElementsAndBytes { elements, .. } => {
+                self.events_per_second(elements as f64, typical, values)
+            }
+            Throughput::Bytes(bytes) => self.bytes_per_second(bytes as f64, typical, values),
+            Throughput::BytesDecimal(bytes) => {
+                self.decimal_bytes_per_second(bytes as f64, typical, values)
+            }
+            Throughput::Bits(bits) => {
+                self.decimal_bytes_per_second(bits as f64 / 8.0, typical, values)
+            }
         }
-
-        unit
     }
 
     fn scale_for_machines(&self, _values: &mut [f64]) -> &'static str {
@@ -434,7 +501,10 @@ fn coder_round_trip(c: &mut Criterion<EventTime>) {
     );
 
     let mut group = c.benchmark_group("coder-decode-encode");
-    group.throughput(Throughput::Elements(EVENTS as u64));
+    group.throughput(Throughput::ElementsAndBytes {
+        elements: EVENTS as u64,
+        bytes: production.len() as u64,
+    });
 
     group.bench_function("q16", |b| {
         b.iter(|| black_box(transcode::<Q16>(black_box(&source), black_box(&q16))));
