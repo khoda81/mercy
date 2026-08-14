@@ -1,0 +1,46 @@
+name: Benchmarks
+
+on:
+  push:
+    branches: [main, agent/serde-prediction-model]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: mercy-bench
+  cancel-in-progress: true
+
+jobs:
+  benchmark:
+    # Performance numbers are only meaningful on the canonical target machine.
+    runs-on: [self-hosted, linux, x64, mercy-bench]
+    env:
+      RUSTFLAGS: -C target-cpu=native
+      CARGO_TERM_COLOR: never
+
+    steps:
+      - uses: actions/checkout@v5
+
+      - name: Toolchain info
+        run: |
+          rustc --version --verbose
+          cargo --version
+          uname -a
+          lscpu
+
+      - name: Coder benchmarks
+        shell: bash
+        run: |
+          set -o pipefail
+          cargo bench --bench output_bytes_bench 2>&1 | tee benchmark-coder.txt
+
+      - name: Upload coder benchmark results
+        if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: mercy-coder-benchmark-results
+          path: benchmark-coder.txt
+          if-no-files-found: warn
+          retention-days: 30
