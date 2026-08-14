@@ -137,7 +137,6 @@ fn consume_tagged(mut output: TaggedOutput) -> u64 {
 fn output_bytes(c: &mut Criterion) {
     for &(count_name, count) in COUNTS {
         for &(repeated_name, repeated) in REPEATED_BYTES {
-            // With no repeated bytes, the two polarities are the same case.
             if count == 0 && repeated != 0 {
                 continue;
             }
@@ -166,5 +165,49 @@ fn output_bytes(c: &mut Criterion) {
     }
 }
 
-criterion_group!(benches, output_bytes);
+#[inline(always)]
+fn split_q16(range: u32, raw: u16) -> u32 {
+    ((range as u64 * raw as u64) >> 16) as u32
+}
+
+#[inline(always)]
+fn split_canonical_q17(range: u32, raw: u16) -> u32 {
+    let probability = (1u32 << 16) | raw as u32;
+    ((range as u64 * probability as u64) >> 17) as u32
+}
+
+fn probability_split(c: &mut Criterion) {
+    const N: u32 = 1024;
+
+    let mut group = c.benchmark_group("probability-split");
+    group.throughput(Throughput::Elements(N as u64));
+
+    group.bench_function("q16-full-interval", |b| {
+        b.iter(|| {
+            let mut checksum = 0u32;
+            for i in 0..N {
+                let range = black_box(0x01_0001 + ((i * 7919) & 0xfe_fffe));
+                let raw = black_box((i.wrapping_mul(40503) as u16).wrapping_add(1));
+                checksum = checksum.wrapping_add(split_q16(range, raw));
+            }
+            black_box(checksum)
+        });
+    });
+
+    group.bench_function("canonical-q17-half-interval", |b| {
+        b.iter(|| {
+            let mut checksum = 0u32;
+            for i in 0..N {
+                let range = black_box(0x01_0001 + ((i * 7919) & 0xfe_fffe));
+                let raw = black_box(i.wrapping_mul(40503) as u16);
+                checksum = checksum.wrapping_add(split_canonical_q17(range, raw));
+            }
+            black_box(checksum)
+        });
+    });
+
+    group.finish();
+}
+
+criterion_group!(benches, output_bytes, probability_split);
 criterion_main!(benches);
