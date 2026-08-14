@@ -148,7 +148,11 @@ impl Iterator for OutputBytes {
 #[doc(hidden)]
 pub mod implementations;
 
-// Q17 is the production implementation until a benchmarked candidate wins.
+/// Pre-optimization implementation retained as a benchmark baseline.
+#[doc(hidden)]
+pub mod legacy;
+
+// Q17 with direct radix shifts is the production implementation while we benchmark candidates.
 pub use implementations::q17::{RangeDecoder, RangeEncoder};
 
 #[test]
@@ -232,26 +236,33 @@ fn implementation_candidates_match_production() {
     let events = random_events();
     let expected = encode_production(&events);
 
+    let mut legacy_encoder = legacy::RangeEncoder::new();
+    let mut legacy_bytes = Vec::new();
     let mut range_encoder = range_shift::RangeEncoder::new();
     let mut range_bytes = Vec::new();
     let mut branchless_encoder = branchless::RangeEncoder::new();
     let mut branchless_bytes = Vec::new();
 
     for &(p, lower) in &events {
+        legacy_bytes.extend(legacy_encoder.put(p, lower));
         range_bytes.extend(range_encoder.put(p, lower));
         branchless_bytes.extend(branchless_encoder.put(p, lower));
     }
 
+    legacy_bytes.extend(legacy_encoder.finish());
     range_bytes.extend(range_encoder.finish());
     branchless_bytes.extend(branchless_encoder.finish());
 
+    assert_eq!(legacy_bytes, expected);
     assert_eq!(range_bytes, expected);
     assert_eq!(branchless_bytes, expected);
 
+    let mut legacy_decoder = legacy::RangeDecoder::new(&legacy_bytes);
     let mut range_decoder = range_shift::RangeDecoder::new(&range_bytes);
     let mut branchless_decoder = branchless::RangeDecoder::new(&branchless_bytes);
 
     for &(p, expected) in &events {
+        assert_eq!(legacy_decoder.test(p), expected);
         assert_eq!(range_decoder.test(p), expected);
         assert_eq!(branchless_decoder.test(p), expected);
     }
