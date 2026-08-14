@@ -30,11 +30,11 @@ jobs:
           uname -a
           lscpu
 
-      - name: Coder benchmarks
+      - name: Probability split benchmarks
         shell: bash
         run: |
           set -o pipefail
-          cargo bench --bench output_bytes_bench 2>&1 | tee benchmark-coder.txt
+          cargo bench --bench output_bytes_bench -- probability-split 2>&1 | tee benchmark-coder.txt
 
       - name: Upload coder benchmark results
         if: always()
