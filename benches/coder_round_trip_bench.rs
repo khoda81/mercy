@@ -3,8 +3,8 @@ use std::time::{Duration, Instant};
 
 use criterion::measurement::{Measurement, ValueFormatter};
 use criterion::{criterion_group, criterion_main, Criterion, Throughput};
-use mercy::coder::implementations::{branchless, q16, range_shift};
-use mercy::coder::{branchless_inline, legacy, legacy_inline, range_shift_inline};
+use mercy::coder::implementations::{branchless, q16, q17, range_shift};
+use mercy::coder::{legacy, legacy_inline, range_shift_inline};
 use mercy::{FractionalU16, RangeDecoder, RangeEncoder};
 
 struct EventTime;
@@ -195,6 +195,21 @@ fn transcode_legacy_inline(source: &[u8], probabilities: &[u16]) -> Vec<u8> {
     output
 }
 
+fn transcode_q17_shift(source: &[u8], probabilities: &[u16]) -> Vec<u8> {
+    let mut decoder = q17::RangeDecoder::new(source);
+    let mut encoder = q17::RangeEncoder::new();
+    let mut output = Vec::with_capacity(probabilities.len() / 8 + 16);
+
+    for &raw in probabilities {
+        let p = FractionalU16::from_raw(raw);
+        let lower = decoder.test(p);
+        output.extend(encoder.put(p, lower));
+    }
+
+    output.extend(encoder.finish());
+    output
+}
+
 fn transcode_production(source: &[u8], probabilities: &[u16]) -> Vec<u8> {
     let mut decoder = RangeDecoder::new(source);
     let mut encoder = RangeEncoder::new();
@@ -255,21 +270,6 @@ fn transcode_branchless(source: &[u8], probabilities: &[u16]) -> Vec<u8> {
     output
 }
 
-fn transcode_branchless_inline(source: &[u8], probabilities: &[u16]) -> Vec<u8> {
-    let mut decoder = branchless_inline::RangeDecoder::new(source);
-    let mut encoder = branchless_inline::RangeEncoder::new();
-    let mut output = Vec::with_capacity(probabilities.len() / 8 + 16);
-
-    for &raw in probabilities {
-        let p = FractionalU16::from_raw(raw);
-        let lower = decoder.test(p);
-        output.extend(encoder.put(p, lower));
-    }
-
-    output.extend(encoder.finish());
-    output
-}
-
 fn decode_q16(source: &[u8], probabilities: &[u16]) -> Vec<u8> {
     let mut decoder = q16::RangeDecoder::new(source);
     probabilities
@@ -318,19 +318,19 @@ fn coder_round_trip(c: &mut Criterion<EventTime>) {
     let q16_bytes = transcode_q16(&source, &q16_probabilities);
     let legacy_bytes = transcode_legacy(&source, &q17_probabilities);
     let legacy_inline_bytes = transcode_legacy_inline(&source, &q17_probabilities);
-    let production = transcode_production(&source, &q17_probabilities);
+    let q17_shift_bytes = transcode_q17_shift(&source, &q17_probabilities);
     let range_shift_bytes = transcode_range_shift(&source, &q17_probabilities);
     let range_shift_inline_bytes = transcode_range_shift_inline(&source, &q17_probabilities);
     let branchless_bytes = transcode_branchless(&source, &q17_probabilities);
-    let branchless_inline_bytes = transcode_branchless_inline(&source, &q17_probabilities);
+    let production = transcode_production(&source, &q17_probabilities);
 
     assert_eq!(q16_bytes, production);
     assert_eq!(legacy_bytes, production);
     assert_eq!(legacy_inline_bytes, production);
+    assert_eq!(q17_shift_bytes, production);
     assert_eq!(range_shift_bytes, production);
     assert_eq!(range_shift_inline_bytes, production);
     assert_eq!(branchless_bytes, production);
-    assert_eq!(branchless_inline_bytes, production);
     assert_eq!(
         decode_production(&production, &q17_probabilities),
         production_choices
@@ -375,9 +375,9 @@ fn coder_round_trip(c: &mut Criterion<EventTime>) {
         });
     });
 
-    group.bench_function("q17-shift-production", |b| {
+    group.bench_function("q17-shift", |b| {
         b.iter(|| {
-            black_box(transcode_production(
+            black_box(transcode_q17_shift(
                 black_box(&source),
                 black_box(&q17_probabilities),
             ))
@@ -411,9 +411,9 @@ fn coder_round_trip(c: &mut Criterion<EventTime>) {
         });
     });
 
-    group.bench_function("branchless-inline", |b| {
+    group.bench_function("production", |b| {
         b.iter(|| {
-            black_box(transcode_branchless_inline(
+            black_box(transcode_production(
                 black_box(&source),
                 black_box(&q17_probabilities),
             ))
