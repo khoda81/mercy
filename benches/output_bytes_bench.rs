@@ -1,23 +1,20 @@
 use std::hint::black_box;
+use std::marker::PhantomData;
 
-use criterion::{criterion_group, criterion_main, BenchmarkId, Criterion, Throughput};
+use criterion::{criterion_group, criterion_main, Criterion, Throughput};
+use mercy::{FractionalU16, RangeDecoder, RangeEncoder};
+
+const RANGE_BITS: u32 = 24;
+const FULL_RANGE: u32 = 1 << RANGE_BITS;
+const RANGE_TOP: u32 = 1 << (RANGE_BITS - 8);
 
 const TAG: usize = 1usize << (usize::BITS - 1);
 const COUNT_MASK: usize = !TAG;
 
-const COUNTS: &[(&str, usize)] = &[
-    ("single-byte", 0),
-    ("two-bytes", 1),
-    ("three-bytes", 2),
-    ("inline-capacity", 3),
-    ("first-compressed", 4),
-    ("short-run", 8),
-    ("medium-run", 100),
-    ("long-run", 4_096),
-    ("pathological-run", 65_536),
-];
-
-const REPEATED_BYTES: &[(&str, u8)] = &[("zero", 0x00), ("ff", 0xff)];
+trait Emission: Iterator<Item = u8> + Sized {
+    fn empty() -> Self;
+    fn push(&mut self, first: u8, repeated: u8, repeated_count: usize);
+}
 
 #[derive(Clone, Copy)]
 struct IsizeOutput {
@@ -26,29 +23,64 @@ struct IsizeOutput {
 }
 
 impl IsizeOutput {
-    fn run(first: u8, repeated: u8, count: usize) -> Self {
-        let len = count + 1;
-        let mut bytes = [0; 4];
-        bytes[0] = first;
+    fn push_byte(&mut self, byte: u8) {
+        let remaining = self.remaining.unsigned_abs();
 
-        if len <= bytes.len() {
-            bytes[1..len].fill(repeated);
-            Self {
-                bytes,
-                remaining: len as isize,
-            }
+        if remaining < self.bytes.len() {
+            self.bytes[remaining] = byte;
+            self.remaining = (remaining + 1) as isize;
+            return;
+        }
+
+        let [first, a, b, c] = self.bytes;
+
+        if remaining == self.bytes.len() {
+            self.remaining = if a == 0xff { 5 } else { -5 };
         } else {
-            bytes[1..].fill(repeated);
-            Self {
-                bytes,
-                remaining: if repeated == 0xff {
+            self.remaining += if self.remaining > 0 { 1 } else { -1 };
+        }
+
+        self.bytes = [first, b, c, byte];
+    }
+}
+
+impl Emission for IsizeOutput {
+    fn empty() -> Self {
+        Self {
+            bytes: [0; 4],
+            remaining: 0,
+        }
+    }
+
+    fn push(&mut self, first: u8, repeated: u8, repeated_count: usize) {
+        if self.remaining == 0 {
+            let len = repeated_count + 1;
+            self.bytes[0] = first;
+
+            if len <= self.bytes.len() {
+                self.bytes[1..len].fill(repeated);
+                self.remaining = len as isize;
+            } else {
+                self.bytes[1..].fill(repeated);
+                self.remaining = if repeated == 0xff {
                     len as isize
                 } else {
                     -(len as isize)
-                },
+                };
             }
+
+            return;
+        }
+
+        self.push_byte(first);
+        for _ in 0..repeated_count {
+            self.push_byte(repeated);
         }
     }
+}
+
+impl Iterator for IsizeOutput {
+    type Item = u8;
 
     #[inline(always)]
     fn next(&mut self) -> Option<u8> {
@@ -65,6 +97,7 @@ impl IsizeOutput {
             self.bytes = [a, b, c, 0];
             self.remaining = (remaining - 1) as isize;
         }
+
         Some(first)
     }
 }
@@ -76,22 +109,60 @@ struct TaggedOutput {
 }
 
 impl TaggedOutput {
-    fn run(first: u8, repeated: u8, count: usize) -> Self {
-        let len = count + 1;
-        let mut bytes = [0; 4];
-        bytes[0] = first;
+    fn push_byte(&mut self, byte: u8) {
+        let remaining = self.state & COUNT_MASK;
 
-        if len <= bytes.len() {
-            bytes[1..len].fill(repeated);
-            Self { bytes, state: len }
+        if remaining < self.bytes.len() {
+            self.bytes[remaining] = byte;
+            self.state = remaining + 1;
+            return;
+        }
+
+        let [first, a, b, c] = self.bytes;
+
+        if remaining == self.bytes.len() {
+            self.state = 5 | if a == 0xff { TAG } else { 0 };
         } else {
-            bytes[1..].fill(repeated);
-            Self {
-                bytes,
-                state: len | if repeated == 0xff { TAG } else { 0 },
-            }
+            self.state += 1;
+        }
+
+        self.bytes = [first, b, c, byte];
+    }
+}
+
+impl Emission for TaggedOutput {
+    fn empty() -> Self {
+        Self {
+            bytes: [0; 4],
+            state: 0,
         }
     }
+
+    fn push(&mut self, first: u8, repeated: u8, repeated_count: usize) {
+        if self.state == 0 {
+            let len = repeated_count + 1;
+            self.bytes[0] = first;
+
+            if len <= self.bytes.len() {
+                self.bytes[1..len].fill(repeated);
+                self.state = len;
+            } else {
+                self.bytes[1..].fill(repeated);
+                self.state = len | if repeated == 0xff { TAG } else { 0 };
+            }
+
+            return;
+        }
+
+        self.push_byte(first);
+        for _ in 0..repeated_count {
+            self.push_byte(repeated);
+        }
+    }
+}
+
+impl Iterator for TaggedOutput {
+    type Item = u8;
 
     #[inline(always)]
     fn next(&mut self) -> Option<u8> {
@@ -108,106 +179,227 @@ impl TaggedOutput {
             self.bytes = [a, b, c, 0];
             self.state = remaining - 1;
         }
+
         Some(first)
     }
 }
 
-#[inline]
-fn consume_isize(mut output: IsizeOutput) -> u64 {
-    let mut checksum = 0u64;
-
-    while let Some(byte) = output.next() {
-        checksum = checksum.wrapping_add(byte as u64);
-    }
-
-    checksum
+struct BenchEncoder<O> {
+    low: u32,
+    denominator: u32,
+    pending: usize,
+    output: PhantomData<fn() -> O>,
 }
 
-#[inline]
-fn consume_tagged(mut output: TaggedOutput) -> u64 {
-    let mut checksum = 0u64;
-
-    while let Some(byte) = output.next() {
-        checksum = checksum.wrapping_add(byte as u64);
-    }
-
-    checksum
-}
-
-fn output_bytes(c: &mut Criterion) {
-    for &(count_name, count) in COUNTS {
-        for &(repeated_name, repeated) in REPEATED_BYTES {
-            if count == 0 && repeated != 0 {
-                continue;
-            }
-
-            let mut group = c.benchmark_group(format!("output-bytes/{count_name}/{repeated_name}"));
-            group.throughput(Throughput::Bytes((count + 1) as u64));
-
-            group.bench_function(BenchmarkId::from_parameter("isize"), |b| {
-                b.iter(|| {
-                    let output =
-                        IsizeOutput::run(black_box(0x42), black_box(repeated), black_box(count));
-                    black_box(consume_isize(output))
-                });
-            });
-
-            group.bench_function(BenchmarkId::from_parameter("tagged"), |b| {
-                b.iter(|| {
-                    let output =
-                        TaggedOutput::run(black_box(0x42), black_box(repeated), black_box(count));
-                    black_box(consume_tagged(output))
-                });
-            });
-
-            group.finish();
+impl<O: Emission> BenchEncoder<O> {
+    fn new() -> Self {
+        Self {
+            low: 0,
+            denominator: FULL_RANGE - 1,
+            pending: 0,
+            output: PhantomData,
         }
     }
+
+    #[inline(always)]
+    fn put(&mut self, raw: u16, lower: bool) -> O {
+        let mut output = O::empty();
+        let split = split(self.denominator + 1, raw);
+
+        if lower {
+            self.denominator = split - 1;
+        } else {
+            let [old_head, ..] = self.low.to_be_bytes();
+
+            self.low = self.low.wrapping_add(split);
+            self.denominator -= split;
+            let [head, ..] = self.low.to_be_bytes();
+
+            if head != old_head {
+                if self.pending == 0 {
+                    self.pending = 1;
+                } else {
+                    output.push(head, 0x00, self.pending - 1);
+
+                    let [_, a, b, c] = self.low.to_be_bytes();
+                    self.low = u32::from_be_bytes([0, a, b, c]);
+                    self.pending = 0;
+                }
+            }
+        }
+
+        self.renormalize(&mut output);
+        output
+    }
+
+    #[inline(always)]
+    fn renormalize(&mut self, output: &mut O) {
+        for _ in 0..3 {
+            if self.denominator < RANGE_TOP {
+                let [head, next, a, b] = self.low.to_be_bytes();
+
+                if self.pending == 0 {
+                    self.low = u32::from_be_bytes([next, a, b, 0]);
+                    self.pending = 1;
+                } else if next == 0xff {
+                    self.low = u32::from_be_bytes([head, a, b, 0]);
+                    self.pending += 1;
+                } else {
+                    output.push(head, 0xff, self.pending - 1);
+                    self.low = u32::from_be_bytes([next, a, b, 0]);
+                    self.pending = 1;
+                }
+
+                self.denominator = append_byte(self.denominator, 0xff);
+            }
+        }
+    }
+
+    fn finish(mut self) -> O {
+        let mut output = O::empty();
+        self.denominator = 0;
+        self.renormalize(&mut output);
+
+        if self.pending != 0 {
+            let [head, ..] = self.low.to_be_bytes();
+            output.push(head, 0xff, self.pending - 1);
+        }
+
+        output
+    }
 }
 
 #[inline(always)]
-fn split_q16(range: u32, raw: u16) -> u32 {
-    ((range as u64 * raw as u64) >> 16) as u32
-}
-
-#[inline(always)]
-fn split_canonical_q17(range: u32, raw: u16) -> u32 {
+fn split(range: u32, raw: u16) -> u32 {
     let probability = (1u32 << 16) | raw as u32;
     ((range as u64 * probability as u64) >> 17) as u32
 }
 
-fn probability_split(c: &mut Criterion) {
-    const N: u32 = 1024;
+#[inline(always)]
+fn append_byte(value: u32, byte: u8) -> u32 {
+    let [_, a, b, c] = value.to_be_bytes();
+    u32::from_be_bytes([a, b, c, byte])
+}
 
-    let mut group = c.benchmark_group("probability-split");
-    group.throughput(Throughput::Elements(N as u64));
+fn encode<O: Emission>(probabilities: &[u16], choices: &[u8]) -> Vec<u8> {
+    let mut encoder = BenchEncoder::<O>::new();
+    let mut bytes = Vec::with_capacity(probabilities.len() / 8 + 16);
 
-    group.bench_function("q16-full-interval", |b| {
+    for (&raw, &lower) in probabilities.iter().zip(choices) {
+        bytes.extend(encoder.put(raw, lower != 0));
+    }
+
+    bytes.extend(encoder.finish());
+    bytes
+}
+
+fn encode_production(probabilities: &[u16], choices: &[u8]) -> Vec<u8> {
+    let mut encoder = RangeEncoder::new();
+    let mut bytes = Vec::with_capacity(probabilities.len() / 8 + 16);
+
+    for (&raw, &lower) in probabilities.iter().zip(choices) {
+        bytes.extend(encoder.put(FractionalU16::from_raw(raw), lower != 0));
+    }
+
+    bytes.extend(encoder.finish());
+    bytes
+}
+
+fn decode_checksum(bytes: &[u8], probabilities: &[u16]) -> u64 {
+    let mut decoder = RangeDecoder::new(bytes);
+    let mut checksum = 0u64;
+
+    for &raw in probabilities {
+        let lower = decoder.test(FractionalU16::from_raw(raw));
+        checksum = checksum.rotate_left(1) ^ lower as u64;
+    }
+
+    checksum
+}
+
+fn verify(bytes: &[u8], probabilities: &[u16], choices: &[u8]) {
+    let mut decoder = RangeDecoder::new(bytes);
+
+    for (&raw, &expected) in probabilities.iter().zip(choices) {
+        assert_eq!(
+            decoder.test(FractionalU16::from_raw(raw)),
+            expected != 0
+        );
+    }
+}
+
+fn round_trip<O: Emission>(probabilities: &[u16], choices: &[u8]) -> (usize, u64) {
+    let bytes = encode::<O>(probabilities, choices);
+    let checksum = decode_checksum(&bytes, probabilities);
+    (bytes.len(), checksum)
+}
+
+fn workload(len: usize) -> (Vec<u16>, Vec<u8>) {
+    let mut seed = 0x9e37_79b9_7f4a_7c15_u64;
+    let mut probabilities = Vec::with_capacity(len);
+    let mut choices = Vec::with_capacity(len);
+
+    let mut random = || {
+        seed ^= seed << 13;
+        seed ^= seed >> 7;
+        seed ^= seed << 17;
+        seed
+    };
+
+    for _ in 0..len {
+        let raw = random() as u16;
+        let threshold = (1u32 << 16) + raw as u32;
+        let sample = (random() & 0x1ffff) as u32;
+
+        probabilities.push(raw);
+        choices.push(u8::from(sample < threshold));
+    }
+
+    (probabilities, choices)
+}
+
+fn coder_round_trip(c: &mut Criterion) {
+    const EVENTS: usize = 1 << 20;
+
+    let (probabilities, choices) = workload(EVENTS);
+
+    let isize_bytes = encode::<IsizeOutput>(&probabilities, &choices);
+    let tagged_bytes = encode::<TaggedOutput>(&probabilities, &choices);
+    let production_bytes = encode_production(&probabilities, &choices);
+
+    assert_eq!(isize_bytes, tagged_bytes);
+    assert_eq!(tagged_bytes, production_bytes);
+    verify(&production_bytes, &probabilities, &choices);
+
+    eprintln!(
+        "round-trip workload: {EVENTS} events -> {} bytes ({:.4} bits/event)",
+        production_bytes.len(),
+        production_bytes.len() as f64 * 8.0 / EVENTS as f64
+    );
+
+    let mut group = c.benchmark_group("coder-round-trip");
+    group.throughput(Throughput::Elements(EVENTS as u64));
+
+    group.bench_function("isize", |b| {
         b.iter(|| {
-            let mut checksum = 0u32;
-            for i in 0..N {
-                let range = black_box(0x01_0001 + ((i * 7919) & 0xfe_fffe));
-                let raw = black_box((i.wrapping_mul(40503) as u16).wrapping_add(1));
-                checksum = checksum.wrapping_add(split_q16(range, raw));
-            }
-            black_box(checksum)
+            black_box(round_trip::<IsizeOutput>(
+                black_box(&probabilities),
+                black_box(&choices),
+            ))
         });
     });
 
-    group.bench_function("canonical-q17-half-interval", |b| {
+    group.bench_function("tagged", |b| {
         b.iter(|| {
-            let mut checksum = 0u32;
-            for i in 0..N {
-                let range = black_box(0x01_0001 + ((i * 7919) & 0xfe_fffe));
-                let raw = black_box(i.wrapping_mul(40503) as u16);
-                checksum = checksum.wrapping_add(split_canonical_q17(range, raw));
-            }
-            black_box(checksum)
+            black_box(round_trip::<TaggedOutput>(
+                black_box(&probabilities),
+                black_box(&choices),
+            ))
         });
     });
 
     group.finish();
 }
 
-criterion_group!(benches, output_bytes, probability_split);
+criterion_group!(benches, coder_round_trip);
 criterion_main!(benches);
