@@ -281,60 +281,49 @@ fn append_byte(value: u32, byte: u8) -> u32 {
     u32::from_be_bytes([a, b, c, byte])
 }
 
-fn encode<O: Emission>(probabilities: &[u16], choices: &[u8]) -> Vec<u8> {
+fn transcode<O: Emission>(source: &[u8], probabilities: &[u16]) -> Vec<u8> {
+    let mut decoder = RangeDecoder::new(source);
     let mut encoder = BenchEncoder::<O>::new();
-    let mut bytes = Vec::with_capacity(probabilities.len() / 8 + 16);
-
-    for (&raw, &lower) in probabilities.iter().zip(choices) {
-        bytes.extend(encoder.put(raw, lower != 0));
-    }
-
-    bytes.extend(encoder.finish());
-    bytes
-}
-
-fn encode_production(probabilities: &[u16], choices: &[u8]) -> Vec<u8> {
-    let mut encoder = RangeEncoder::new();
-    let mut bytes = Vec::with_capacity(probabilities.len() / 8 + 16);
-
-    for (&raw, &lower) in probabilities.iter().zip(choices) {
-        bytes.extend(encoder.put(FractionalU16::from_raw(raw), lower != 0));
-    }
-
-    bytes.extend(encoder.finish());
-    bytes
-}
-
-fn decode_checksum(bytes: &[u8], probabilities: &[u16]) -> u64 {
-    let mut decoder = RangeDecoder::new(bytes);
-    let mut checksum = 0u64;
+    let mut output = Vec::with_capacity(probabilities.len() / 8 + 16);
 
     for &raw in probabilities {
         let lower = decoder.test(FractionalU16::from_raw(raw));
-        checksum = checksum.rotate_left(1) ^ lower as u64;
+        output.extend(encoder.put(raw, lower));
     }
 
-    checksum
+    output.extend(encoder.finish());
+    output
 }
 
-fn verify(bytes: &[u8], probabilities: &[u16], choices: &[u8]) {
-    let mut decoder = RangeDecoder::new(bytes);
+fn transcode_production(source: &[u8], probabilities: &[u16]) -> Vec<u8> {
+    let mut decoder = RangeDecoder::new(source);
+    let mut encoder = RangeEncoder::new();
+    let mut output = Vec::with_capacity(probabilities.len() / 8 + 16);
 
-    for (&raw, &expected) in probabilities.iter().zip(choices) {
-        assert_eq!(decoder.test(FractionalU16::from_raw(raw)), expected != 0);
+    for &raw in probabilities {
+        let p = FractionalU16::from_raw(raw);
+        let lower = decoder.test(p);
+        output.extend(encoder.put(p, lower));
     }
+
+    output.extend(encoder.finish());
+    output
 }
 
-fn round_trip<O: Emission>(probabilities: &[u16], choices: &[u8]) -> (usize, u64) {
-    let bytes = encode::<O>(probabilities, choices);
-    let checksum = decode_checksum(&bytes, probabilities);
-    (bytes.len(), checksum)
+fn decode_choices(source: &[u8], probabilities: &[u16]) -> Vec<u8> {
+    let mut decoder = RangeDecoder::new(source);
+    probabilities
+        .iter()
+        .map(|&raw| u8::from(decoder.test(FractionalU16::from_raw(raw))))
+        .collect()
 }
 
-fn workload(len: usize) -> (Vec<u16>, Vec<u8>) {
+fn verify(source: &[u8], probabilities: &[u16], expected: &[u8]) {
+    assert_eq!(decode_choices(source, probabilities), expected);
+}
+
+fn workload(events: usize) -> (Vec<u16>, Vec<u8>) {
     let mut seed = 0x9e37_79b9_7f4a_7c15_u64;
-    let mut probabilities = Vec::with_capacity(len);
-    let mut choices = Vec::with_capacity(len);
 
     let mut random = || {
         seed ^= seed << 13;
@@ -343,33 +332,31 @@ fn workload(len: usize) -> (Vec<u16>, Vec<u8>) {
         seed
     };
 
-    for _ in 0..len {
-        let raw = random() as u16;
-        let threshold = (1u32 << 16) + raw as u32;
-        let sample = (random() & 0x1ffff) as u32;
+    let probabilities = (0..events).map(|_| random() as u16).collect();
 
-        probabilities.push(raw);
-        choices.push(u8::from(sample < threshold));
-    }
+    // Initialization and every event can pull at most three bytes, so this
+    // guarantees the benchmark never reaches implicit zero-extended EOF.
+    let source = (0..events * 3 + 3).map(|_| random() as u8).collect();
 
-    (probabilities, choices)
+    (probabilities, source)
 }
 
 fn coder_round_trip(c: &mut Criterion) {
     const EVENTS: usize = 1 << 20;
 
-    let (probabilities, choices) = workload(EVENTS);
+    let (probabilities, source) = workload(EVENTS);
+    let choices = decode_choices(&source, &probabilities);
 
-    let isize_bytes = encode::<IsizeOutput>(&probabilities, &choices);
-    let tagged_bytes = encode::<TaggedOutput>(&probabilities, &choices);
-    let production_bytes = encode_production(&probabilities, &choices);
+    let isize_bytes = transcode::<IsizeOutput>(&source, &probabilities);
+    let tagged_bytes = transcode::<TaggedOutput>(&source, &probabilities);
+    let production_bytes = transcode_production(&source, &probabilities);
 
     assert_eq!(isize_bytes, tagged_bytes);
     assert_eq!(tagged_bytes, production_bytes);
     verify(&production_bytes, &probabilities, &choices);
 
     eprintln!(
-        "round-trip workload: {EVENTS} events -> {} bytes ({:.4} bits/event)",
+        "decoder-sampled workload: {EVENTS} events -> {} canonical bytes ({:.4} bits/event)",
         production_bytes.len(),
         production_bytes.len() as f64 * 8.0 / EVENTS as f64
     );
@@ -379,18 +366,27 @@ fn coder_round_trip(c: &mut Criterion) {
 
     group.bench_function("isize", |b| {
         b.iter(|| {
-            black_box(round_trip::<IsizeOutput>(
+            black_box(transcode::<IsizeOutput>(
+                black_box(&source),
                 black_box(&probabilities),
-                black_box(&choices),
             ))
         });
     });
 
     group.bench_function("tagged", |b| {
         b.iter(|| {
-            black_box(round_trip::<TaggedOutput>(
+            black_box(transcode::<TaggedOutput>(
+                black_box(&source),
                 black_box(&probabilities),
-                black_box(&choices),
+            ))
+        });
+    });
+
+    group.bench_function("production", |b| {
+        b.iter(|| {
+            black_box(transcode_production(
+                black_box(&source),
+                black_box(&probabilities),
             ))
         });
     });
