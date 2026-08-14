@@ -164,8 +164,7 @@ pub mod range_shift_inline;
 #[doc(hidden)]
 pub mod branchless_inline;
 
-// Q17 with direct radix shifts is the production implementation while we benchmark candidates.
-pub use implementations::q17::{RangeDecoder, RangeEncoder};
+pub use branchless_inline::{RangeDecoder, RangeEncoder};
 
 #[test]
 fn canonical_probability_grid_keeps_both_branches_nonempty() {
@@ -289,7 +288,8 @@ fn implementation_candidates_match_production() {
     let mut range_decoder = range_shift::RangeDecoder::new(&range_bytes);
     let mut range_inline_decoder = range_shift_inline::RangeDecoder::new(&range_inline_bytes);
     let mut branchless_decoder = branchless::RangeDecoder::new(&branchless_bytes);
-    let mut branchless_inline_decoder = branchless_inline::RangeDecoder::new(&branchless_inline_bytes);
+    let mut branchless_inline_decoder =
+        branchless_inline::RangeDecoder::new(&branchless_inline_bytes);
 
     for &(p, expected) in &events {
         assert_eq!(legacy_decoder.test(p), expected);
