@@ -321,10 +321,7 @@ fn verify(bytes: &[u8], probabilities: &[u16], choices: &[u8]) {
     let mut decoder = RangeDecoder::new(bytes);
 
     for (&raw, &expected) in probabilities.iter().zip(choices) {
-        assert_eq!(
-            decoder.test(FractionalU16::from_raw(raw)),
-            expected != 0
-        );
+        assert_eq!(decoder.test(FractionalU16::from_raw(raw)), expected != 0);
     }
 }
 
