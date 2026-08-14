@@ -152,9 +152,17 @@ pub mod implementations;
 #[doc(hidden)]
 pub mod legacy;
 
+/// Pre-optimization implementation with forced cross-crate inlining.
+#[doc(hidden)]
+pub mod legacy_inline;
+
 /// Actual-range candidate with forced cross-crate inlining.
 #[doc(hidden)]
 pub mod range_shift_inline;
+
+/// Branchless actual-range candidate with forced cross-crate inlining.
+#[doc(hidden)]
+pub mod branchless_inline;
 
 // Q17 with direct radix shifts is the production implementation while we benchmark candidates.
 pub use implementations::q17::{RangeDecoder, RangeEncoder};
@@ -242,39 +250,53 @@ fn implementation_candidates_match_production() {
 
     let mut legacy_encoder = legacy::RangeEncoder::new();
     let mut legacy_bytes = Vec::new();
+    let mut legacy_inline_encoder = legacy_inline::RangeEncoder::new();
+    let mut legacy_inline_bytes = Vec::new();
     let mut range_encoder = range_shift::RangeEncoder::new();
     let mut range_bytes = Vec::new();
-    let mut inline_encoder = range_shift_inline::RangeEncoder::new();
-    let mut inline_bytes = Vec::new();
+    let mut range_inline_encoder = range_shift_inline::RangeEncoder::new();
+    let mut range_inline_bytes = Vec::new();
     let mut branchless_encoder = branchless::RangeEncoder::new();
     let mut branchless_bytes = Vec::new();
+    let mut branchless_inline_encoder = branchless_inline::RangeEncoder::new();
+    let mut branchless_inline_bytes = Vec::new();
 
     for &(p, lower) in &events {
         legacy_bytes.extend(legacy_encoder.put(p, lower));
+        legacy_inline_bytes.extend(legacy_inline_encoder.put(p, lower));
         range_bytes.extend(range_encoder.put(p, lower));
-        inline_bytes.extend(inline_encoder.put(p, lower));
+        range_inline_bytes.extend(range_inline_encoder.put(p, lower));
         branchless_bytes.extend(branchless_encoder.put(p, lower));
+        branchless_inline_bytes.extend(branchless_inline_encoder.put(p, lower));
     }
 
     legacy_bytes.extend(legacy_encoder.finish());
+    legacy_inline_bytes.extend(legacy_inline_encoder.finish());
     range_bytes.extend(range_encoder.finish());
-    inline_bytes.extend(inline_encoder.finish());
+    range_inline_bytes.extend(range_inline_encoder.finish());
     branchless_bytes.extend(branchless_encoder.finish());
+    branchless_inline_bytes.extend(branchless_inline_encoder.finish());
 
     assert_eq!(legacy_bytes, expected);
+    assert_eq!(legacy_inline_bytes, expected);
     assert_eq!(range_bytes, expected);
-    assert_eq!(inline_bytes, expected);
+    assert_eq!(range_inline_bytes, expected);
     assert_eq!(branchless_bytes, expected);
+    assert_eq!(branchless_inline_bytes, expected);
 
     let mut legacy_decoder = legacy::RangeDecoder::new(&legacy_bytes);
+    let mut legacy_inline_decoder = legacy_inline::RangeDecoder::new(&legacy_inline_bytes);
     let mut range_decoder = range_shift::RangeDecoder::new(&range_bytes);
-    let mut inline_decoder = range_shift_inline::RangeDecoder::new(&inline_bytes);
+    let mut range_inline_decoder = range_shift_inline::RangeDecoder::new(&range_inline_bytes);
     let mut branchless_decoder = branchless::RangeDecoder::new(&branchless_bytes);
+    let mut branchless_inline_decoder = branchless_inline::RangeDecoder::new(&branchless_inline_bytes);
 
     for &(p, expected) in &events {
         assert_eq!(legacy_decoder.test(p), expected);
+        assert_eq!(legacy_inline_decoder.test(p), expected);
         assert_eq!(range_decoder.test(p), expected);
-        assert_eq!(inline_decoder.test(p), expected);
+        assert_eq!(range_inline_decoder.test(p), expected);
         assert_eq!(branchless_decoder.test(p), expected);
+        assert_eq!(branchless_inline_decoder.test(p), expected);
     }
 }
