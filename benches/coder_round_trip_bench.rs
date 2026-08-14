@@ -1,17 +1,10 @@
 use std::hint::black_box;
-use std::marker::PhantomData;
 use std::time::{Duration, Instant};
 
 use criterion::measurement::{Measurement, ValueFormatter};
 use criterion::{criterion_group, criterion_main, Criterion, Throughput};
+use mercy::coder::implementations::{branchless, q16, range_shift};
 use mercy::{FractionalU16, RangeDecoder, RangeEncoder};
-
-const RANGE_BITS: u32 = 24;
-const FULL_RANGE: u32 = 1 << RANGE_BITS;
-const RANGE_TOP: u32 = 1 << (RANGE_BITS - 8);
-
-const TAG: usize = 1usize << (usize::BITS - 1);
-const COUNT_MASK: usize = !TAG;
 
 struct EventTime;
 struct EventFormatter;
@@ -168,276 +161,19 @@ impl ValueFormatter for EventFormatter {
     }
 }
 
-trait ProbabilityGrid {
-    fn split(range: u32, raw: u16) -> u32;
-}
-
-struct Q16;
-struct Q17;
-
-impl ProbabilityGrid for Q16 {
-    #[inline(always)]
-    fn split(range: u32, raw: u16) -> u32 {
-        debug_assert!(raw >= 1 << 15);
-        ((range as u64 * raw as u64) >> 16) as u32
-    }
-}
-
-impl ProbabilityGrid for Q17 {
-    #[inline(always)]
-    fn split(range: u32, raw: u16) -> u32 {
-        let probability = (1u32 << 16) | raw as u32;
-        ((range as u64 * probability as u64) >> 17) as u32
-    }
-}
-
-#[derive(Clone, Copy)]
-struct OutputBytes {
-    bytes: [u8; 4],
-    state: usize,
-}
-
-impl OutputBytes {
-    fn new() -> Self {
-        Self {
-            bytes: [0; 4],
-            state: 0,
-        }
-    }
-
-    fn push(&mut self, first: u8, repeated: u8, repeated_count: usize) {
-        if self.state == 0 {
-            let len = repeated_count + 1;
-            self.bytes[0] = first;
-
-            if len <= self.bytes.len() {
-                self.bytes[1..len].fill(repeated);
-                self.state = len;
-            } else {
-                self.bytes[1..].fill(repeated);
-                self.state = len | if repeated == 0xff { TAG } else { 0 };
-            }
-
-            return;
-        }
-
-        self.push_byte(first);
-        for _ in 0..repeated_count {
-            self.push_byte(repeated);
-        }
-    }
-
-    fn push_byte(&mut self, byte: u8) {
-        let remaining = self.state & COUNT_MASK;
-
-        if remaining < self.bytes.len() {
-            self.bytes[remaining] = byte;
-            self.state = remaining + 1;
-            return;
-        }
-
-        let [first, a, b, c] = self.bytes;
-
-        if remaining == self.bytes.len() {
-            self.state = 5 | if a == 0xff { TAG } else { 0 };
-        } else {
-            self.state += 1;
-        }
-
-        self.bytes = [first, b, c, byte];
-    }
-}
-
-impl Iterator for OutputBytes {
-    type Item = u8;
-
-    #[inline(always)]
-    fn next(&mut self) -> Option<u8> {
-        let remaining = self.state & COUNT_MASK;
-        if remaining == 0 {
-            return None;
-        }
-
-        let [first, a, b, c] = self.bytes;
-
-        if remaining > self.bytes.len() {
-            self.bytes[0] = if self.state & TAG != 0 { 0xff } else { 0x00 };
-            self.state -= 1;
-        } else {
-            self.bytes = [a, b, c, 0];
-            self.state = remaining - 1;
-        }
-
-        Some(first)
-    }
-}
-
-struct BenchEncoder<G> {
-    low: u32,
-    denominator: u32,
-    pending: usize,
-    grid: PhantomData<fn() -> G>,
-}
-
-impl<G: ProbabilityGrid> BenchEncoder<G> {
-    fn new() -> Self {
-        Self {
-            low: 0,
-            denominator: FULL_RANGE - 1,
-            pending: 0,
-            grid: PhantomData,
-        }
-    }
-
-    #[inline(always)]
-    fn put(&mut self, raw: u16, lower: bool) -> OutputBytes {
-        let mut output = OutputBytes::new();
-        let split = G::split(self.denominator + 1, raw);
-
-        if lower {
-            self.denominator = split - 1;
-        } else {
-            let [old_head, ..] = self.low.to_be_bytes();
-
-            self.low = self.low.wrapping_add(split);
-            self.denominator -= split;
-            let [head, ..] = self.low.to_be_bytes();
-
-            if head != old_head {
-                if self.pending == 0 {
-                    self.pending = 1;
-                } else {
-                    output.push(head, 0x00, self.pending - 1);
-
-                    let [_, a, b, c] = self.low.to_be_bytes();
-                    self.low = u32::from_be_bytes([0, a, b, c]);
-                    self.pending = 0;
-                }
-            }
-        }
-
-        self.renormalize(&mut output);
-        output
-    }
-
-    #[inline(always)]
-    fn renormalize(&mut self, output: &mut OutputBytes) {
-        for _ in 0..3 {
-            if self.denominator < RANGE_TOP {
-                let [head, next, a, b] = self.low.to_be_bytes();
-
-                if self.pending == 0 {
-                    self.low = u32::from_be_bytes([next, a, b, 0]);
-                    self.pending = 1;
-                } else if next == 0xff {
-                    self.low = u32::from_be_bytes([head, a, b, 0]);
-                    self.pending += 1;
-                } else {
-                    output.push(head, 0xff, self.pending - 1);
-                    self.low = u32::from_be_bytes([next, a, b, 0]);
-                    self.pending = 1;
-                }
-
-                self.denominator = append_byte(self.denominator, 0xff);
-            }
-        }
-    }
-
-    fn finish(mut self) -> OutputBytes {
-        let mut output = OutputBytes::new();
-        self.denominator = 0;
-        self.renormalize(&mut output);
-
-        if self.pending != 0 {
-            let [head, ..] = self.low.to_be_bytes();
-            output.push(head, 0xff, self.pending - 1);
-        }
-
-        output
-    }
-}
-
-struct BenchDecoder<'a, G> {
-    numerator: u32,
-    denominator: u32,
-    input: &'a [u8],
-    grid: PhantomData<fn() -> G>,
-}
-
-impl<'a, G: ProbabilityGrid> BenchDecoder<'a, G> {
-    fn new(input: &'a [u8]) -> Self {
-        let mut decoder = Self {
-            numerator: 0,
-            denominator: 0,
-            input,
-            grid: PhantomData,
-        };
-        decoder.renormalize();
-        decoder
-    }
-
-    #[inline(always)]
-    fn test(&mut self, raw: u16) -> bool {
-        let split = G::split(self.denominator + 1, raw);
-        let lower = self.numerator < split;
-
-        if lower {
-            self.denominator = split - 1;
-        } else {
-            self.numerator -= split;
-            self.denominator -= split;
-        }
-
-        self.renormalize();
-        lower
-    }
-
-    #[inline(always)]
-    fn renormalize(&mut self) {
-        for _ in 0..3 {
-            if self.denominator < RANGE_TOP {
-                self.denominator = append_byte(self.denominator, 0xff);
-                self.numerator = append_byte(self.numerator, self.read_byte());
-            }
-        }
-    }
-
-    #[inline(always)]
-    fn read_byte(&mut self) -> u8 {
-        let [byte, rest @ ..] = self.input else {
-            return 0;
-        };
-        self.input = rest;
-        *byte
-    }
-}
-
-#[inline(always)]
-fn append_byte(value: u32, byte: u8) -> u32 {
-    let [_, a, b, c] = value.to_be_bytes();
-    u32::from_be_bytes([a, b, c, byte])
-}
-
-fn transcode<G: ProbabilityGrid>(source: &[u8], probabilities: &[u16]) -> Vec<u8> {
-    let mut decoder = BenchDecoder::<G>::new(source);
-    let mut encoder = BenchEncoder::<G>::new();
+fn transcode_q16(source: &[u8], probabilities: &[u16]) -> Vec<u8> {
+    let mut decoder = q16::RangeDecoder::new(source);
+    let mut encoder = q16::RangeEncoder::new();
     let mut output = Vec::with_capacity(probabilities.len() / 8 + 16);
 
     for &raw in probabilities {
-        let lower = decoder.test(raw);
-        output.extend(encoder.put(raw, lower));
+        let p = q16::Probability::from_raw(raw);
+        let lower = decoder.test(p);
+        output.extend(encoder.put(p, lower));
     }
 
     output.extend(encoder.finish());
     output
-}
-
-fn decode_choices<G: ProbabilityGrid>(source: &[u8], probabilities: &[u16]) -> Vec<u8> {
-    let mut decoder = BenchDecoder::<G>::new(source);
-    probabilities
-        .iter()
-        .map(|&raw| u8::from(decoder.test(raw)))
-        .collect()
 }
 
 fn transcode_production(source: &[u8], probabilities: &[u16]) -> Vec<u8> {
@@ -455,6 +191,52 @@ fn transcode_production(source: &[u8], probabilities: &[u16]) -> Vec<u8> {
     output
 }
 
+fn transcode_range_shift(source: &[u8], probabilities: &[u16]) -> Vec<u8> {
+    let mut decoder = range_shift::RangeDecoder::new(source);
+    let mut encoder = range_shift::RangeEncoder::new();
+    let mut output = Vec::with_capacity(probabilities.len() / 8 + 16);
+
+    for &raw in probabilities {
+        let p = FractionalU16::from_raw(raw);
+        let lower = decoder.test(p);
+        output.extend(encoder.put(p, lower));
+    }
+
+    output.extend(encoder.finish());
+    output
+}
+
+fn transcode_branchless(source: &[u8], probabilities: &[u16]) -> Vec<u8> {
+    let mut decoder = branchless::RangeDecoder::new(source);
+    let mut encoder = branchless::RangeEncoder::new();
+    let mut output = Vec::with_capacity(probabilities.len() / 8 + 16);
+
+    for &raw in probabilities {
+        let p = FractionalU16::from_raw(raw);
+        let lower = decoder.test(p);
+        output.extend(encoder.put(p, lower));
+    }
+
+    output.extend(encoder.finish());
+    output
+}
+
+fn decode_q16(source: &[u8], probabilities: &[u16]) -> Vec<u8> {
+    let mut decoder = q16::RangeDecoder::new(source);
+    probabilities
+        .iter()
+        .map(|&raw| u8::from(decoder.test(q16::Probability::from_raw(raw))))
+        .collect()
+}
+
+fn decode_production(source: &[u8], probabilities: &[u16]) -> Vec<u8> {
+    let mut decoder = RangeDecoder::new(source);
+    probabilities
+        .iter()
+        .map(|&raw| u8::from(decoder.test(FractionalU16::from_raw(raw))))
+        .collect()
+}
+
 fn workload(events: usize) -> (Vec<u8>, Vec<u16>, Vec<u16>) {
     let mut seed = 0x9e37_79b9_7f4a_7c15_u64;
 
@@ -470,8 +252,6 @@ fn workload(events: usize) -> (Vec<u8>, Vec<u16>, Vec<u16>) {
         .collect();
     let q17 = q16.iter().map(|&raw| (raw - 0x8000) << 1).collect();
 
-    // Initialization and every event can pull at most three bytes, so this
-    // guarantees the benchmark never reaches implicit zero-extended EOF.
     let source = (0..events * 3 + 3).map(|_| random() as u8).collect();
 
     (source, q16, q17)
@@ -480,19 +260,21 @@ fn workload(events: usize) -> (Vec<u8>, Vec<u16>, Vec<u16>) {
 fn coder_round_trip(c: &mut Criterion<EventTime>) {
     const EVENTS: usize = 1 << 20;
 
-    let (source, q16, q17) = workload(EVENTS);
+    let (source, q16_probabilities, q17_probabilities) = workload(EVENTS);
 
-    let q16_choices = decode_choices::<Q16>(&source, &q16);
-    let q17_choices = decode_choices::<Q17>(&source, &q17);
-    assert_eq!(q16_choices, q17_choices);
+    let q16_choices = decode_q16(&source, &q16_probabilities);
+    let production_choices = decode_production(&source, &q17_probabilities);
+    assert_eq!(q16_choices, production_choices);
 
-    let q16_bytes = transcode::<Q16>(&source, &q16);
-    let q17_bytes = transcode::<Q17>(&source, &q17);
-    assert_eq!(q16_bytes, q17_bytes);
+    let q16_bytes = transcode_q16(&source, &q16_probabilities);
+    let production = transcode_production(&source, &q17_probabilities);
+    let range_shift_bytes = transcode_range_shift(&source, &q17_probabilities);
+    let branchless_bytes = transcode_branchless(&source, &q17_probabilities);
 
-    let production = transcode_production(&source, &q17);
-    assert_eq!(q17_bytes, production);
-    assert_eq!(decode_choices::<Q17>(&production, &q17), q17_choices);
+    assert_eq!(q16_bytes, production);
+    assert_eq!(range_shift_bytes, production);
+    assert_eq!(branchless_bytes, production);
+    assert_eq!(decode_production(&production, &q17_probabilities), production_choices);
 
     eprintln!(
         "matched workload: {EVENTS} events -> {} canonical bytes ({:.4} bits/event)",
@@ -507,11 +289,39 @@ fn coder_round_trip(c: &mut Criterion<EventTime>) {
     });
 
     group.bench_function("q16", |b| {
-        b.iter(|| black_box(transcode::<Q16>(black_box(&source), black_box(&q16))));
+        b.iter(|| {
+            black_box(transcode_q16(
+                black_box(&source),
+                black_box(&q16_probabilities),
+            ))
+        });
     });
 
-    group.bench_function("q17", |b| {
-        b.iter(|| black_box(transcode::<Q17>(black_box(&source), black_box(&q17))));
+    group.bench_function("q17-production", |b| {
+        b.iter(|| {
+            black_box(transcode_production(
+                black_box(&source),
+                black_box(&q17_probabilities),
+            ))
+        });
+    });
+
+    group.bench_function("range-shift", |b| {
+        b.iter(|| {
+            black_box(transcode_range_shift(
+                black_box(&source),
+                black_box(&q17_probabilities),
+            ))
+        });
+    });
+
+    group.bench_function("branchless", |b| {
+        b.iter(|| {
+            black_box(transcode_branchless(
+                black_box(&source),
+                black_box(&q17_probabilities),
+            ))
+        });
     });
 
     group.finish();
