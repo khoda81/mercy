@@ -1,0 +1,20 @@
+[package]
+name = "mercy"
+version = "0.1.0"
+edition = "2021"
+description = "Experimental ranked-prefix arithmetic coding primitives"
+license = "MIT OR Apache-2.0"
+
+[lib]
+path = "src/lib.rs"
+
+[dependencies]
+bitvec = "1"
+num-bigint = "0.4"
+
+[dev-dependencies]
+criterion = { version = "0.8", features = ["html_reports"] }
+
+[[bench]]
+name = "tail_probability"
+harness = false
