@@ -36,8 +36,21 @@ multiplication layout does not merely move work upstream.
 
 ## Status
 
-Idea
+Implemented under `dyadic::implementations` with a common candidate value and
+registry. The durable suite measures prepare-from-current-layout,
+multiplication, and `scale_floor_u64` for all five layouts.
 
 ## Results
 
-TBD
+Native `BigUint` storage won every multiplication and scaling size. At 200k,
+multiplication fell from about 40.58 ms for MSB bits to 18.04 ms (2.25x), and
+scaling fell from about 6.09 ms to 15.13 us (about 402x). Big- and
+little-endian bytes were close on multiplication and intermediate on scaling.
+
+Preparing alternatives from an already-built MSB `BigDyadic` necessarily pays
+the current bit-by-bit numerator conversion: native preparation cost about
+6.07 ms at 200k, while cloning the incumbent took 0.224 ms. A native production
+constructor would avoid that conversion, but changing `BigDyadic` would remove
+its borrowed `as_bits()` representation and two-word handle invariant. Native
+is exported as the experimental `DEFAULT`; production retains MSB bits until
+that public API tradeoff is decided explicitly.

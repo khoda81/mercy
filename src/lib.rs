@@ -19,7 +19,7 @@
 //! every stored probability.
 
 mod coder;
-mod dyadic;
+pub mod dyadic;
 pub mod prefix;
 
 pub use coder::Coder;

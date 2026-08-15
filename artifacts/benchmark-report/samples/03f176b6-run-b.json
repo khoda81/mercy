@@ -1,0 +1,10 @@
+{
+  "run": "03f176b6-run-b",
+  "recorded_at": "2026-08-15T20:47:31.472238+00:00",
+  "revision": "03f176b6e1f5",
+  "rustc": "rustc 1.97.1 (8bab26f4f 2026-07-14)",
+  "platform": "Linux-7.1.8-1-cachyos-x86_64-with-glibc2.44",
+  "sample_count": 1400,
+  "criterion_source": "target/criterion",
+  "semantics": "Each row is one Criterion sampled batch; latency_ns = total_time_ns / iterations."
+}

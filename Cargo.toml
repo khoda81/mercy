@@ -22,3 +22,7 @@ harness = false
 [[bench]]
 name = "dyadic_multiply"
 harness = false
+
+[[bench]]
+name = "dyadic_layout"
+harness = false

@@ -5,6 +5,7 @@ use std::ops::{
 
 use crate::BigDyadic;
 
+pub mod fixtures;
 pub mod implementations;
 
 /// An ordered prefix of conditional event probabilities.
@@ -175,6 +176,14 @@ impl RankedPrefix {
     /// files contain no arithmetic implementation.
     pub fn tail_probability(&self) -> BigDyadic {
         implementations::compute(self)
+    }
+
+    /// Consume owned probability storage while computing the exact tail.
+    ///
+    /// The selected implementation may reuse the input allocation as scratch;
+    /// callers that only have a borrow should use [`Self::tail_probability`].
+    pub fn into_tail_probability(this: Box<Self>) -> BigDyadic {
+        implementations::owned::compute(this)
     }
 }
 

@@ -80,12 +80,14 @@ to eight remaining odd factors in a `u64`. This is safe because
 `255^8 < 2^64`. Chunk products are merged through an online balanced BigUint
 multiplication tree.
 
-Performance candidates live in separate modules under `prefix::implementations`, not
-in the benchmark harness. The public `prefix::implementations::compute` function and
-`RankedPrefix::tail_probability` use the measured winner. All candidates remain
-publicly addressable, and `PERFORMANCE_CANDIDATES` gives Criterion one durable
-registry to enumerate. The scalar implementation is retained as an exactness
-reference without forcing its poor large-input scaling into every timed run.
+Performance candidates live in separate modules under
+`prefix::implementations`, not in the benchmark harness. The public
+`prefix::implementations::compute` function and
+`RankedPrefix::tail_probability` use the measured all-workload winner. All
+candidates remain publicly addressable, and `PERFORMANCE_CANDIDATES` gives
+Criterion one durable registry to enumerate. The scalar implementation is
+retained as an exactness reference without forcing its poor large-input scaling
+into every timed run.
 
 This structure is intentionally friendly to future SIMD work: the public
 semantics are exact and scalar, while the hot small-factor reduction can be
@@ -105,6 +107,12 @@ There is no separately stored precision field. The type is intentionally a
 single owning bit-slice handle and asserts that its value representation is two
 machine words.
 
+Alternate layouts live under `dyadic::implementations`. Native `BigUint`
+storage is the measured arithmetic winner and is exported there as `DEFAULT`.
+It is not yet the `BigDyadic` representation because doing so would remove the
+borrowed `as_bits()` view and the two-word handle invariant; that is a public
+API decision rather than an implementation-only optimization.
+
 ## Coder contract
 
 `Coder` intentionally guarantees only exact-path determinism.
@@ -120,11 +128,14 @@ contract they cannot safely keep.
 ```bash
 cargo bench --bench tail_probability
 cargo bench --bench dyadic_multiply
+cargo bench --bench dyadic_layout
 ```
 
-The Criterion suites measure each crate-owned tail-performance candidate on one
-deterministic mixed distribution and exact equal-precision `BigDyadic`
-multiplication. Both cover models from 8 through 200,000 probability entries.
+The Criterion suites measure each crate-owned tail candidate on patterned,
+`vec![1; n]`, and model-shaped flat/peaked/long-tail inputs; consuming tail
+implementations with allocation inside and outside timing; production dyadic
+multiplication; and five alternate layouts across construction, multiplication,
+and `scale_floor_u64`. Sizes span 8 through 200,000 entries where applicable.
 Optimization hypotheses and results belong in the
 [experiment notebook](experiments/README.md).
 

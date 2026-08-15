@@ -36,8 +36,13 @@ changes do not shift cost into the next public operation.
 
 ## Status
 
-Idea
+Implemented as `prefix::implementations::widening_u128` and included in the
+full candidate registry.
 
 ## Results
 
-TBD
+On the 2026-08-16 run, widening won four of seven patterned sizes, including
+50k at about 4.30 ms and 200k at about 29.32 ms. It won only one of the other
+19 workload/size cells and was materially slower on sparse model-shaped hazard
+arrays. Online-balanced therefore remains the public default across the whole
+matrix.

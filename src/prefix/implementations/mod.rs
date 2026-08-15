@@ -8,7 +8,9 @@ use crate::{BigDyadic, RankedPrefix};
 
 pub mod batch_balanced;
 pub mod online_balanced;
+pub mod owned;
 pub mod scalar;
+pub mod widening_u128;
 
 /// Production implementation selected by the durable benchmark matrix.
 pub use online_balanced::compute;
@@ -38,10 +40,16 @@ impl Candidate {
 
 pub const ONLINE_BALANCED: Candidate = Candidate::new("online-balanced", online_balanced::compute);
 pub const BATCH_BALANCED: Candidate = Candidate::new("batch-balanced", batch_balanced::compute);
+pub const WIDENING_U128: Candidate = Candidate::new("widening-u128", widening_u128::compute);
 pub const SCALAR_REFERENCE: Candidate = Candidate::new("scalar-reference", scalar::compute);
 
-pub const PERFORMANCE_CANDIDATES: &[Candidate] = &[ONLINE_BALANCED, BATCH_BALANCED];
-pub const ALL_IMPLEMENTATIONS: &[Candidate] = &[ONLINE_BALANCED, BATCH_BALANCED, SCALAR_REFERENCE];
+pub const PERFORMANCE_CANDIDATES: &[Candidate] = &[ONLINE_BALANCED, BATCH_BALANCED, WIDENING_U128];
+pub const ALL_IMPLEMENTATIONS: &[Candidate] = &[
+    ONLINE_BALANCED,
+    BATCH_BALANCED,
+    WIDENING_U128,
+    SCALAR_REFERENCE,
+];
 
 /// Descriptor for the candidate used by [`RankedPrefix::tail_probability`].
 pub const DEFAULT: Candidate = ONLINE_BALANCED;

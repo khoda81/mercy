@@ -14,14 +14,18 @@ from dataclasses import dataclass
 from datetime import datetime, timezone
 from pathlib import Path
 
-SIZES = (8, 16, 64, 256, 4_096, 50_000, 200_000)
-BENCHMARKS = {
-    "Tail probability": ("tail_patterned/online-balanced", "bytes/s"),
-    "Tail probability (batch-balanced)": (
-        "tail_patterned/batch-balanced",
-        "bytes/s",
-    ),
-    "Dyadic multiply": ("dyadic_multiply_equal", "entries/s"),
+GROUP_LABELS = {
+    "tail/patterned": "Tail probability / patterned",
+    "tail/ones": "Tail probability / vec![1; n]",
+    "tail/model-flat": "Tail probability / model-shaped flat",
+    "tail/model-peaked": "Tail probability / model-shaped peaked",
+    "tail/model-long-tail": "Tail probability / model-shaped long-tail",
+    "tail-owned/outside/patterned": "Owned tail / allocation outside",
+    "tail-owned/inside/patterned": "Owned tail / allocation inside",
+    "dyadic_multiply/equal": "Production dyadic multiply",
+    "dyadic-layout/multiply": "Dyadic layout / multiply",
+    "dyadic-layout/scale-floor-u64": "Dyadic layout / scale floor u64",
+    "dyadic-layout/construct": "Dyadic layout / construct",
 }
 
 
@@ -62,34 +66,63 @@ def command_output(command: list[str]) -> str:
 
 def current_samples(root: Path, run: str) -> list[Sample]:
     samples: list[Sample] = []
-    for operation, (group, unit) in BENCHMARKS.items():
-        for size in SIZES:
-            path = root / group / str(size) / "new" / "sample.json"
-            if not path.exists():
-                raise FileNotFoundError(
-                    f"missing {path}; run both Criterion suites first"
+    for benchmark_path in sorted(root.glob("**/new/benchmark.json")):
+        benchmark = json.loads(benchmark_path.read_text())
+        group_id = benchmark.get("group_id")
+        if group_id not in GROUP_LABELS:
+            continue
+        try:
+            size = int(benchmark["value_str"])
+        except (KeyError, TypeError, ValueError) as error:
+            raise ValueError(
+                f"non-numeric benchmark size in {benchmark_path}"
+            ) from error
+        if size <= 0:
+            # Historical diagnostic groups used zero-byte sentinels. They do
+            # not have meaningful throughput and are outside the durable matrix.
+            continue
+        implementation = benchmark.get("function_id")
+        if group_id != "dyadic_multiply/equal" and not implementation:
+            # Ignore stale pre-registry diagnostics that reused a durable group
+            # name without a candidate function id.
+            continue
+        operation = GROUP_LABELS[group_id]
+        if implementation:
+            operation = f"{operation} ({implementation})"
+        throughput = benchmark.get("throughput") or {}
+        if "Bytes" in throughput:
+            unit = "bytes/s"
+        elif "Elements" in throughput:
+            unit = "entries/s"
+        else:
+            raise ValueError(f"missing throughput metadata in {benchmark_path}")
+
+        path = benchmark_path.with_name("sample.json")
+        if not path.exists():
+            raise FileNotFoundError(f"missing {path}; run the Criterion suite first")
+        payload = json.loads(path.read_text())
+        iterations = payload["iters"]
+        times = payload["times"]
+        if len(iterations) != len(times):
+            raise ValueError(f"mismatched iteration/time arrays in {path}")
+        for index, (count, total_ns) in enumerate(zip(iterations, times)):
+            latency_ns = float(total_ns) / float(count)
+            measured_throughput = size * 1e9 / latency_ns
+            samples.append(
+                Sample(
+                    run,
+                    operation,
+                    size,
+                    index,
+                    float(count),
+                    float(total_ns),
+                    latency_ns,
+                    measured_throughput,
+                    unit,
                 )
-            payload = json.loads(path.read_text())
-            iterations = payload["iters"]
-            times = payload["times"]
-            if len(iterations) != len(times):
-                raise ValueError(f"mismatched iteration/time arrays in {path}")
-            for index, (count, total_ns) in enumerate(zip(iterations, times)):
-                latency_ns = float(total_ns) / float(count)
-                throughput = size * 1e9 / latency_ns
-                samples.append(
-                    Sample(
-                        run,
-                        operation,
-                        size,
-                        index,
-                        float(count),
-                        float(total_ns),
-                        latency_ns,
-                        throughput,
-                        unit,
-                    )
-                )
+            )
+    if not samples:
+        raise FileNotFoundError(f"no recognized Criterion samples under {root}")
     return samples
 
 

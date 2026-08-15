@@ -133,10 +133,11 @@ u8 probabilities
 ```
 
 Each candidate owns that full computation in a separate module under
-`prefix::implementations`. The production entry point directly re-exports the measured
-winner, while a crate-owned registry exposes every serious performance
-candidate to Criterion. The benchmark harness therefore contains input and
-timing logic only; it does not become a second home for production arithmetic.
+`prefix::implementations`. The production entry point directly re-exports the
+measured all-workload winner, while a crate-owned registry exposes every serious
+performance candidate to Criterion. The benchmark harness therefore contains
+input and timing logic only; it does not become a second home for production
+arithmetic.
 
 The first two stages are the main SIMD target. Callers do not choose a kernel
 through `RankedPrefix`, so scalar, autovectorized, portable-SIMD, and
@@ -168,15 +169,17 @@ without silently breaking a stronger algebraic expectation.
 ## 6. Current benchmark targets
 
 The first benchmark target is `RankedPrefix::tail_probability`. Criterion uses
-one deterministic mixed-byte distribution at prefix lengths from 8 through
-200k and applies every entry in `prefix::implementations::PERFORMANCE_CANDIDATES` to
-that identical input matrix. The scalar reference is excluded from the full
-matrix because its sequential large-integer growth is not a viable performance
-candidate.
+patterned, repeated-one, and model-shaped flat/peaked/long-tail workloads at
+prefix lengths through 200k and applies every entry in
+`prefix::implementations::PERFORMANCE_CANDIDATES` to each identical input. The
+scalar reference is excluded from the full matrix because its sequential
+large-integer growth is not a viable performance candidate. A separate owned
+matrix accounts for input allocation inside and outside the timed region.
 
 The second target is exact `BigDyadic` multiplication, using equal-size values
-derived from deterministic prefix tails. This is the next real operation needed
-to form zoom boundaries such as `D * A`.
+derived from deterministic prefix tails. A layout matrix additionally compares
+MSB/LSB bit storage, big-/little-endian bytes, and native `BigUint` storage for
+conversion, multiplication, and `scale_floor_u64`.
 
 Speculative implementation work and its results belong in the `experiments/`
 lab notebook. Durable implementation comparisons should enumerate crate code

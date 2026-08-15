@@ -28,8 +28,21 @@ arrays. Add coder-operation targets only after a concrete coder exists.
 
 ## Status
 
-Idea
+The reproducible fixture pipeline is implemented under `prefix::fixtures` for
+4k, 50k, 100k, and 200k flat, peaked, and long-tail weight distributions. It
+converts ranked integer weights into quantized conditional hazards with a
+documented deterministic rule.
 
 ## Results
 
-TBD
+These model-shaped proxies exposed a regime absent from the mixed-byte input:
+many hazards quantize to zero, so online/batch candidates process 200k entries
+in roughly 0.20 ms rather than tens of milliseconds. Online won seven of twelve
+model-shaped cells and batch won five; widening won none.
+
+No actual model output was available in the repository, and the older remote
+model experiment benchmarks topology APIs rather than storing probability
+captures. The committed fixtures are therefore labeled model-shaped synthetic
+proxies, not real-model evidence. Capturing licensed, provenance-recorded model
+outputs remains a data-acquisition task rather than an unimplemented benchmark
+path.

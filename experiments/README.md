@@ -24,6 +24,7 @@ The committed Criterion suites measure operations exposed by the abstraction:
 ```bash
 cargo bench --bench tail_probability
 cargo bench --bench dyadic_multiply
+cargo bench --bench dyadic_layout
 ```
 
 Tail implementations live in separate crate modules and are enumerated through

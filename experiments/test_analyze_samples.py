@@ -26,7 +26,7 @@ class EmpiricalComparisonTests(unittest.TestCase):
             ("Tail probability", "batch-balanced"),
         )
 
-    def test_default_tail_is_labeled_with_its_implementation(self) -> None:
+    def test_unqualified_legacy_tail_is_labeled_with_its_implementation(self) -> None:
         self.assertEqual(
             operation_parts("Tail probability"),
             ("Tail probability", "online-balanced"),

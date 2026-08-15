@@ -30,8 +30,15 @@ region as separate experiments.
 
 ## Status
 
-Idea
+Implemented as `prefix::implementations::owned::reused_buffer`. Complete
+16-byte blocks are reduced with byte-level little-endian loads and stores, so
+the `u8` allocation is never reinterpreted at an invalid alignment. Partial
+blocks use the same widening tree in local storage.
 
 ## Results
 
-TBD
+With allocation outside timing, the borrowed baseline won six of seven sizes;
+at 200k it took about 29.17 ms versus 31.04 ms for reuse. With allocation inside
+timing, reuse won 64, 256, and 4k (about 7.6% at 256) but lost the remaining
+four sizes. The consuming public API therefore selects the borrowed baseline,
+while both candidates remain benchmarkable.

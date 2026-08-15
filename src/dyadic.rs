@@ -3,6 +3,8 @@ use std::{cmp::Ordering, fmt, mem::size_of, ops::Mul};
 use bitvec::prelude::{BitBox, BitSlice, BitVec, Msb0};
 use num_bigint::BigUint;
 
+pub mod implementations;
+
 /// An exact arbitrary-precision dyadic fraction in `[0, 1]`.
 ///
 /// A value is represented as a fixed-width bit string. The first bit is the
