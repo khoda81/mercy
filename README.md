@@ -80,6 +80,13 @@ to eight remaining odd factors in a `u64`. This is safe because
 `255^8 < 2^64`. Chunk products are merged through an online balanced BigUint
 multiplication tree.
 
+Performance candidates live in separate modules under `prefix::implementations`, not
+in the benchmark harness. The public `prefix::implementations::compute` function and
+`RankedPrefix::tail_probability` use the measured winner. All candidates remain
+publicly addressable, and `PERFORMANCE_CANDIDATES` gives Criterion one durable
+registry to enumerate. The scalar implementation is retained as an exactness
+reference without forcing its poor large-input scaling into every timed run.
+
 This structure is intentionally friendly to future SIMD work: the public
 semantics are exact and scalar, while the hot small-factor reduction can be
 replaced independently.
@@ -115,7 +122,13 @@ cargo bench --bench tail_probability
 cargo bench --bench dyadic_multiply
 ```
 
-The Criterion suites measure exact tail computation on one deterministic mixed
-distribution and exact equal-precision `BigDyadic` multiplication. Both cover
-models from 8 through 200,000 probability entries. Optimization hypotheses and
-results belong in the [experiment notebook](experiments/README.md).
+The Criterion suites measure each crate-owned tail-performance candidate on one
+deterministic mixed distribution and exact equal-precision `BigDyadic`
+multiplication. Both cover models from 8 through 200,000 probability entries.
+Optimization hypotheses and results belong in the
+[experiment notebook](experiments/README.md).
+
+Named Criterion samples can be combined into a standalone interactive Plotly
+report. It shows all runs in empirical latency/throughput distributions and
+provides a selectable, model-free pairwise improvement matrix and empirical
+cross-pair log-effect distributions.

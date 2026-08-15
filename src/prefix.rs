@@ -3,9 +3,9 @@ use std::ops::{
     RangeToInclusive,
 };
 
-use num_bigint::BigUint;
-
 use crate::BigDyadic;
+
+pub mod implementations;
 
 /// An ordered prefix of conditional event probabilities.
 ///
@@ -168,69 +168,13 @@ impl RankedPrefix {
     /// product_i ((256 - x_i) / 256).
     /// ```
     ///
-    /// The implementation is exact. It first removes powers of two from each
-    /// small factor, so zero-probability events (`x_i = 0`) disappear entirely
-    /// as multiplicative identities. Up to eight remaining odd factors are
-    /// accumulated in a `u64`; `255^8 < 2^64`, so a chunk cannot overflow.
-    /// Chunk products are then combined through an online balanced tree of
-    /// [`BigUint`] multiplications.
-    ///
-    /// This shape is deliberate: the small-factor reduction is friendly to
-    /// SIMD/vectorization, while balanced large multiplications avoid feeding
-    /// a huge bigint one tiny operand at a time.
+    /// The public operation delegates to [`implementations::compute`], the
+    /// fastest exact candidate selected by the durable benchmark suite. The
+    /// other crate-owned implementations remain available through
+    /// [`implementations`] for direct, apples-to-apples benchmarking; benchmark
+    /// files contain no arithmetic implementation.
     pub fn tail_probability(&self) -> BigDyadic {
-        if self.is_empty() {
-            return BigDyadic::one();
-        }
-
-        let mut fractional_bits = 0usize;
-        let mut levels: Vec<Option<BigUint>> = Vec::new();
-
-        for chunk in self.0.chunks(8) {
-            let mut product = 1u64;
-
-            for &raw in chunk {
-                let factor = 256u16 - raw as u16;
-                let removable = factor.trailing_zeros().min(8) as usize;
-                let odd = (factor >> removable) as u64;
-
-                fractional_bits = fractional_bits
-                    .checked_add(8 - removable)
-                    .expect("RankedPrefix precision overflowed usize");
-                product *= odd;
-            }
-
-            if product != 1 {
-                push_balanced(&mut levels, BigUint::from(product));
-            }
-        }
-
-        let numerator = levels
-            .into_iter()
-            .flatten()
-            .fold(BigUint::from(1u8), |acc, value| acc * value);
-
-        BigDyadic::from_scaled(numerator, fractional_bits)
-    }
-
-    /// Exact scalar reference implementation of [`Self::tail_probability`].
-    ///
-    /// Kept crate-visible for tests. Production code should use the balanced
-    /// implementation above.
-    #[cfg(test)]
-    pub(crate) fn tail_probability_scalar(&self) -> BigDyadic {
-        let mut numerator = BigUint::from(1u8);
-        let mut fractional_bits = 0usize;
-
-        for &raw in &self.0 {
-            let factor = 256u16 - raw as u16;
-            let removable = factor.trailing_zeros().min(8) as usize;
-            let odd = factor >> removable;
-            numerator *= BigUint::from(odd);
-            fractional_bits += 8 - removable;
-        }
-
-        BigDyadic::from_scaled(numerator, fractional_bits)
+        implementations::compute(self)
     }
 }
 
@@ -311,35 +255,10 @@ impl_range_index!(
     RangeFull,
 );
 
-/// Insert an equally-sized product into an online balanced multiplication tree.
-///
-/// `levels[n]` contains a product of `2^n` original chunks. Collisions multiply
-/// equal-sized operands and carry upward, exactly like incrementing a binary
-/// counter.
-fn push_balanced(levels: &mut Vec<Option<BigUint>>, mut value: BigUint) {
-    let mut level = 0usize;
-
-    loop {
-        if level == levels.len() {
-            levels.push(Some(value));
-            return;
-        }
-
-        match levels[level].take() {
-            None => {
-                levels[level] = Some(value);
-                return;
-            }
-            Some(other) => {
-                value *= other;
-                level += 1;
-            }
-        }
-    }
-}
-
 #[cfg(test)]
 mod tests {
+    use num_bigint::BigUint;
+
     use super::*;
 
     #[test]
@@ -396,7 +315,7 @@ mod tests {
     }
 
     #[test]
-    fn balanced_matches_scalar() {
+    fn all_candidates_are_exactly_equivalent() {
         let cases: &[&[u8]] = &[
             &[],
             &[0],
@@ -409,7 +328,11 @@ mod tests {
 
         for &case in cases {
             let prefix = RankedPrefix::from_slice(case);
-            assert_eq!(prefix.tail_probability(), prefix.tail_probability_scalar());
+            let expected = implementations::scalar::compute(prefix);
+            for candidate in implementations::ALL_IMPLEMENTATIONS {
+                assert_eq!(candidate.compute(prefix), expected, "{}", candidate.name);
+            }
+            assert_eq!(prefix.tail_probability(), expected);
         }
     }
 }

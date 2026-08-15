@@ -2,3 +2,4 @@
 Cargo.lock
 
 /artifacts
+__pycache__/

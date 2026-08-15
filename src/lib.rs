@@ -20,7 +20,7 @@
 
 mod coder;
 mod dyadic;
-mod prefix;
+pub mod prefix;
 
 pub use coder::Coder;
 pub use dyadic::BigDyadic;

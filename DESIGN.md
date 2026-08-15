@@ -132,9 +132,17 @@ u8 probabilities
     -> BigDyadic
 ```
 
-The first two stages are the main SIMD target. The public API does not expose a
-kernel choice so scalar, autovectorized, portable-SIMD, and architecture-specific
-implementations can be benchmarked without changing semantics.
+Each candidate owns that full computation in a separate module under
+`prefix::implementations`. The production entry point directly re-exports the measured
+winner, while a crate-owned registry exposes every serious performance
+candidate to Criterion. The benchmark harness therefore contains input and
+timing logic only; it does not become a second home for production arithmetic.
+
+The first two stages are the main SIMD target. Callers do not choose a kernel
+through `RankedPrefix`, so scalar, autovectorized, portable-SIMD, and
+architecture-specific implementations can be benchmarked without changing its
+semantics. Individual modules remain public for focused measurements and
+correctness checks.
 
 ## 5. Coder semantics are path-relative
 
@@ -161,15 +169,18 @@ without silently breaking a stronger algebraic expectation.
 
 The first benchmark target is `RankedPrefix::tail_probability`. Criterion uses
 one deterministic mixed-byte distribution at prefix lengths from 8 through
-200k so iteration stays focused and comparable.
+200k and applies every entry in `prefix::implementations::PERFORMANCE_CANDIDATES` to
+that identical input matrix. The scalar reference is excluded from the full
+matrix because its sequential large-integer growth is not a viable performance
+candidate.
 
 The second target is exact `BigDyadic` multiplication, using equal-size values
 derived from deterministic prefix tails. This is the next real operation needed
 to form zoom boundaries such as `D * A`.
 
 Speculative implementation work and its results belong in the `experiments/`
-lab notebook. The durable Criterion suite should continue to prefer public
-operations over implementation-specific diagnostics.
+lab notebook. Durable implementation comparisons should enumerate crate code
+through the shared registry rather than copying candidate logic into `benches/`.
 
 Arithmetic coder implementations should be added only after the exact prefix
 boundary primitive and its benchmarks are stable. They can then be compared

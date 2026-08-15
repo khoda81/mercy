@@ -1,7 +1,10 @@
 use std::hint::black_box;
 
 use criterion::{criterion_group, criterion_main, BenchmarkId, Criterion, Throughput};
-use mercy::RankedPrefix;
+use mercy::{
+    prefix::implementations::{Candidate, PERFORMANCE_CANDIDATES},
+    RankedPrefix,
+};
 
 const SIZES: &[usize] = &[8, 16, 64, 256, 4_096, 50_000, 200_000];
 
@@ -18,14 +21,23 @@ fn patterned(size: usize) -> Vec<u8> {
 fn tail_probability(c: &mut Criterion) {
     let mut group = c.benchmark_group("tail/patterned");
 
-    for &size in SIZES {
-        let input = patterned(size);
-        group.throughput(Throughput::Bytes(size as u64));
-        group.bench_with_input(BenchmarkId::from_parameter(size), &input, |b, input| {
-            b.iter(|| {
-                let _ = black_box(RankedPrefix::from_slice(black_box(input)).tail_probability());
-            });
-        });
+    for &candidate in PERFORMANCE_CANDIDATES {
+        for &size in SIZES {
+            let input = patterned(size);
+            group.throughput(Throughput::Bytes(size as u64));
+            group.bench_with_input(
+                BenchmarkId::new(candidate.name, size),
+                &(candidate, input),
+                |b, (candidate, input): &(Candidate, Vec<u8>)| {
+                    b.iter(|| {
+                        let _ = black_box(
+                            black_box(*candidate)
+                                .compute(RankedPrefix::from_slice(black_box(input))),
+                        );
+                    });
+                },
+            );
+        }
     }
 
     group.finish();
