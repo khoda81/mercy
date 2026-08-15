@@ -32,10 +32,11 @@ fn bench_family(c: &mut Criterion, name: &str, make: impl Fn(usize) -> Vec<u8>) 
 }
 
 fn tail_probability(c: &mut Criterion) {
+    bench_family(c, "tail/patterned", patterned);
+    bench_family(c, "tail/one", |n| vec![1; n]);
     bench_family(c, "tail/zero", |n| vec![0; n]);
     bench_family(c, "tail/max", |n| vec![255; n]);
     bench_family(c, "tail/half", |n| vec![128; n]);
-    bench_family(c, "tail/patterned", patterned);
 }
 
 criterion_group!(benches, tail_probability);
