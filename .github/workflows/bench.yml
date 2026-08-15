@@ -3,14 +3,14 @@ name: Benchmarks
 on:
   push:
     branches:
-      - agent/hazard-coder-rewrite
+      - main
   workflow_dispatch:
 
 permissions:
   contents: read
 
 concurrency:
-  group: mercy-hazard-rewrite-bench
+  group: mercy-bench
   cancel-in-progress: true
 
 jobs:
