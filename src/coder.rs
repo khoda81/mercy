@@ -112,9 +112,5 @@ pub trait Coder {
     ///
     /// Implementations may emit any bytes whose values become irrevocably fixed
     /// by this restriction.
-    fn zoom(
-        &mut self,
-        denied: RankedPrefix<'_>,
-        accepted: RankedPrefix<'_>,
-    ) -> Self::Output;
+    fn zoom(&mut self, denied: RankedPrefix<'_>, accepted: RankedPrefix<'_>) -> Self::Output;
 }

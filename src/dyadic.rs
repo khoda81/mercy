@@ -1,9 +1,4 @@
-use std::{
-    cmp::Ordering,
-    fmt,
-    mem::size_of,
-    ops::Mul,
-};
+use std::{cmp::Ordering, fmt, mem::size_of, ops::Mul};
 
 use bitvec::prelude::{BitBox, BitSlice, BitVec, Msb0};
 use num_bigint::BigUint;
@@ -191,7 +186,7 @@ impl PartialOrd for BigDyadic {
 impl Mul<&BigDyadic> for &BigDyadic {
     type Output = BigDyadic;
 
-    fn mul(self, rhs: &'b BigDyadic) -> Self::Output {
+    fn mul(self, rhs: &BigDyadic) -> Self::Output {
         self.multiplied(rhs)
     }
 }

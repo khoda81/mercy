@@ -23,7 +23,7 @@ fn bench_family(c: &mut Criterion, name: &str, make: impl Fn(usize) -> Vec<u8>) 
         group.throughput(Throughput::Bytes(size as u64));
         group.bench_with_input(BenchmarkId::from_parameter(size), &input, |b, input| {
             b.iter(|| {
-                black_box(RankedPrefix::new(black_box(input)).tail_probability());
+                let _ = black_box(RankedPrefix::new(black_box(input)).tail_probability());
             });
         });
     }
