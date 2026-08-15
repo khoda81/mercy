@@ -16,6 +16,10 @@ benchmarks.
   and arithmetic cost.
 - [Real-model fixtures](real-model-fixtures.md): replace or augment synthetic
   inputs with stable, representative model outputs.
+- [Histogram and prime tail product](histogram-prime-tail-product.md): exploit
+  commutativity and repeated byte factors through histograms and prime powers.
+- [Size-adaptive tail candidate](size-adaptive-tail.md): compose measured
+  per-size winners and require an all-scale win before production promotion.
 
 ## Durable benchmark targets
 
@@ -64,12 +68,17 @@ The Plotly report embeds its JavaScript and every recorded sample in
 Its latency and throughput ECDFs show every available run. The pairwise panel
 has selectors for operation, input size, and a reference run. It shows a full
 candidate-by-reference matrix of the empirical probability that candidate
-latency is lower, counting ties as one half. Below that, every other candidate
-is compared with the selected reference using all cross-pair effects
-`log(reference / candidate)`, so negative values are regressions and positive
-values are improvements. The legend and summary table report probability of
-improvement, median log improvement, and median multiplicative speedup.
+latency is lower, counting ties as one half. A toggle switches the same matrix
+to signed candidate-minus-reference Elo differences derived from a
+Bradley-Terry fit; both modes are ordered by Bradley-Terry strength. Below that,
+every other candidate is compared with the selected reference using all
+cross-pair effects `log(reference / candidate)`, so negative values are
+regressions and positive values are improvements. The WebGL ECDF keeps every
+effect point but omits markers for responsive interaction. The legend and
+summary table report probability of improvement, Bradley-Terry/Elo scores,
+median log improvement, and median multiplicative speedup.
 
 The `n×m` cross-pairs are an empirical effect-size distribution, not `n×m`
 independent observations. The report fits no parametric distribution or KDE,
-uses no Q-Q area score, and makes no independence-based uncertainty claim.
+uses no Q-Q area score, and makes no independence-based uncertainty claim. The
+Bradley-Terry fit is a descriptive ordering only, with no inferential claim.

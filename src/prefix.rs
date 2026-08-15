@@ -344,4 +344,23 @@ mod tests {
             assert_eq!(prefix.tail_probability(), expected);
         }
     }
+
+    #[test]
+    fn candidates_match_on_large_repeated_and_model_shaped_inputs() {
+        let cases = [
+            fixtures::ONES.generate(4_096),
+            fixtures::PATTERNED.generate(4_096),
+            fixtures::MODEL_FLAT.generate(4_096),
+            fixtures::MODEL_PEAKED.generate(4_096),
+            fixtures::MODEL_LONG_TAIL.generate(4_096),
+        ];
+
+        for case in cases {
+            let prefix = RankedPrefix::from_slice(&case);
+            let expected = implementations::online_balanced::compute(prefix);
+            for candidate in implementations::PERFORMANCE_CANDIDATES {
+                assert_eq!(candidate.compute(prefix), expected, "{}", candidate.name);
+            }
+        }
+    }
 }

@@ -5,7 +5,7 @@ from analyze_samples import (
     cross_pair_log_improvements,
     probability_of_superiority,
 )
-from plot_results import operation_parts
+from plot_results import bradley_terry_scores, elo_rating, operation_parts
 
 
 class EmpiricalComparisonTests(unittest.TestCase):
@@ -31,6 +31,33 @@ class EmpiricalComparisonTests(unittest.TestCase):
             operation_parts("Tail probability"),
             ("Tail probability", "online-balanced"),
         )
+
+    def test_bradley_terry_scores_order_candidates_and_normalize_scale(self) -> None:
+        scores = bradley_terry_scores(
+            {
+                "fast": {"latency": [1.0, 1.1]},
+                "middle": {"latency": [2.0, 2.1]},
+                "slow": {"latency": [3.0, 3.1]},
+            }
+        )
+        self.assertGreater(scores["fast"], scores["middle"])
+        self.assertGreater(scores["middle"], scores["slow"])
+        geometric_mean = math.prod(scores.values()) ** (1 / len(scores))
+        self.assertAlmostEqual(geometric_mean, 1.0)
+
+    def test_bradley_terry_ties_have_equal_finite_scores(self) -> None:
+        scores = bradley_terry_scores(
+            {
+                "a": {"latency": [1.0, 2.0]},
+                "b": {"latency": [1.0, 2.0]},
+            }
+        )
+        self.assertEqual(scores, {"a": 1.0, "b": 1.0})
+
+    def test_elo_uses_the_conventional_log_strength_scale(self) -> None:
+        self.assertEqual(elo_rating(1.0), 0.0)
+        self.assertAlmostEqual(elo_rating(10.0), 400.0)
+        self.assertAlmostEqual(elo_rating(0.1), -400.0)
 
 
 if __name__ == "__main__":

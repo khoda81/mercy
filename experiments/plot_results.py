@@ -10,10 +10,13 @@ from __future__ import annotations
 import argparse
 import csv
 import json
+import math
 import re
 from collections import defaultdict
 from pathlib import Path
 from typing import Any
+
+ELO_SCALE = 400.0
 
 
 def parse_args() -> argparse.Namespace:
@@ -38,6 +41,69 @@ def operation_parts(operation: str) -> tuple[str, str]:
     if operation == "Tail probability":
         return operation, "online-balanced"
     return operation, ""
+
+
+def bradley_terry_scores(
+    series: dict[str, dict[str, Any]], pseudo_wins: float = 0.5
+) -> dict[str, float]:
+    """Fit descriptive Bradley-Terry strengths to all cross-sample outcomes."""
+    ids = list(series)
+    count = len(ids)
+    if count < 2:
+        return {series_id: 1.0 for series_id in ids}
+
+    wins = [0.0] * count
+    games = [[0.0] * count for _ in range(count)]
+    for candidate_index in range(count):
+        candidate = series[ids[candidate_index]]["latency"]
+        for reference_index in range(candidate_index + 1, count):
+            reference = series[ids[reference_index]]["latency"]
+            candidate_wins = pseudo_wins
+            reference_wins = pseudo_wins
+            for candidate_latency in candidate:
+                for reference_latency in reference:
+                    if candidate_latency < reference_latency:
+                        candidate_wins += 1.0
+                    elif candidate_latency > reference_latency:
+                        reference_wins += 1.0
+                    else:
+                        candidate_wins += 0.5
+                        reference_wins += 0.5
+            wins[candidate_index] += candidate_wins
+            wins[reference_index] += reference_wins
+            games[candidate_index][reference_index] = candidate_wins + reference_wins
+            games[reference_index][candidate_index] = candidate_wins + reference_wins
+
+    strengths = [1.0] * count
+    for _ in range(1_000):
+        updated = []
+        for candidate_index in range(count):
+            denominator = math.fsum(
+                games[candidate_index][reference_index]
+                / (strengths[candidate_index] + strengths[reference_index])
+                for reference_index in range(count)
+                if reference_index != candidate_index
+            )
+            updated.append(wins[candidate_index] / denominator)
+
+        geometric_mean = math.exp(
+            math.fsum(math.log(strength) for strength in updated) / count
+        )
+        updated = [strength / geometric_mean for strength in updated]
+        change = max(
+            abs(math.log(new_strength / old_strength))
+            for new_strength, old_strength in zip(updated, strengths)
+        )
+        strengths = updated
+        if change < 1e-12:
+            break
+
+    return dict(zip(ids, strengths))
+
+
+def elo_rating(strength: float) -> float:
+    """Convert a Bradley-Terry strength to a zero-centered conventional Elo rating."""
+    return ELO_SCALE * math.log10(strength)
 
 
 def load_samples(samples_dir: Path) -> dict[str, dict[str, dict[str, Any]]]:
@@ -76,10 +142,16 @@ def load_samples(samples_dir: Path) -> dict[str, dict[str, dict[str, Any]]]:
             "latency": sorted(values["latency"]),
             "throughput": sorted(values["throughput"]),
         }
-    return {
+    report = {
         family: dict(sorted(sizes.items(), key=lambda item: int(item[0])))
         for family, sizes in sorted(report.items())
     }
+    for sizes in report.values():
+        for series in sizes.values():
+            for series_id, score in bradley_terry_scores(series).items():
+                series[series_id]["bt_score"] = score
+                series[series_id]["elo_score"] = elo_rating(score)
+    return report
 
 
 HTML_TEMPLATE = r"""<!doctype html>
@@ -102,6 +174,11 @@ HTML_TEMPLATE = r"""<!doctype html>
     .controls { display: flex; flex-wrap: wrap; gap: 12px; margin: 14px 0; }
     label { display: grid; gap: 5px; color: #94a3b8; font-size: 13px; }
     select { min-width: 180px; padding: 8px 30px 8px 10px; border: 1px solid #475569; border-radius: 8px; background: #0f172a; color: #e5e7eb; }
+    .toggle { display: flex; align-self: end; overflow: hidden; border: 1px solid #475569; border-radius: 8px; }
+    .toggle button { padding: 8px 12px; border: 0; border-right: 1px solid #475569; background: #0f172a; color: #94a3b8; cursor: pointer; }
+    .toggle button:last-child { border-right: 0; }
+    .toggle button:hover { color: #e5e7eb; background: #1e293b; }
+    .toggle button.active { color: #07111f; background: #67e8f9; font-weight: 700; }
     .plot { min-height: 550px; }
     #pairwise-heatmap { min-height: 680px; }
     #effect-distribution { min-height: 680px; }
@@ -115,7 +192,7 @@ HTML_TEMPLATE = r"""<!doctype html>
 </head>
 <body>
   <h1>Mercy empirical benchmark report</h1>
-  <p>Every line uses Criterion's recorded sampled batches directly. No normal, log-normal, KDE, regression, or other sampling distribution is fitted.</p>
+  <p>Every line uses Criterion's recorded sampled batches directly. No normal, log-normal, KDE, or other latency/throughput sampling distribution is fitted. The pairwise matrix uses a Bradley–Terry fit only to rank the empirical win counts.</p>
 
   <section class="card">
     <h2>All-run empirical distributions</h2>
@@ -125,16 +202,20 @@ HTML_TEMPLATE = r"""<!doctype html>
 
   <section class="card">
     <h2>Pairwise benchmark improvement</h2>
-    <p>For reference latency <code>Aᵢ</code> and candidate latency <code>Bⱼ</code>, the empirical effect is <code>Iᵢⱼ = log(Aᵢ/Bⱼ)</code>. Positive values mean the candidate is faster. The matrix shows <code>P(B &lt; A)</code>: rows are candidates, columns are references, ties count one half, and the diagonal is 50%.</p>
+    <p>For reference latency <code>Aᵢ</code> and candidate latency <code>Bⱼ</code>, the empirical effect is <code>Iᵢⱼ = log(Aᵢ/Bⱼ)</code>. Positive values mean the candidate is faster. The probability matrix shows <code>P(B &lt; A)</code>: rows are candidates, columns are references, ties count one half, and the diagonal is 50%. Elo mode instead shows candidate Elo minus reference Elo. Both axes are sorted from highest to lowest Bradley–Terry score fitted to the full pairwise win counts. Strengths are normalized to geometric mean 1 and Elo uses <code>400 log₁₀(strength)</code>, centered at zero. A symmetric half-win pseudocount per pair keeps complete separations finite.</p>
     <div class="controls">
       <label>Operation<select id="comparison-family"></select></label>
       <label>Entries<select id="comparison-size"></select></label>
       <label>Reference run<select id="comparison-reference"></select></label>
+      <div class="toggle" role="group" aria-label="Matrix value">
+        <button id="matrix-probability" class="active" type="button">Probability</button>
+        <button id="matrix-elo" type="button">Elo Δ</button>
+      </div>
     </div>
     <div id="pairwise-heatmap" class="plot"></div>
     <div id="effect-distribution" class="plot"></div>
     <div id="effect-summary"></div>
-    <p class="note">Each curve contains all cross-pair effects for one candidate against the selected reference. Those <code>n×m</code> values describe an empirical effect-size distribution; they are not claimed to be <code>n×m</code> independent samples. No fitted distribution, KDE, Q-Q score, or independence-based uncertainty calculation is used.</p>
+    <p class="note">Each curve contains all cross-pair effects for one candidate against the selected reference. Those <code>n×m</code> values describe an empirical effect-size distribution; they are not claimed to be <code>n×m</code> independent samples. Bradley–Terry scores are used only as a descriptive global ranking; no independence-based uncertainty or significance is claimed. No fitted latency distribution, KDE, or Q-Q score is used.</p>
   </section>
 
   <script>
@@ -176,10 +257,16 @@ HTML_TEMPLATE = r"""<!doctype html>
       const points = cdf(series[metric]);
       const latency = metric === 'latency';
       return {
-        type: 'scatter', mode: 'lines',
+        type: 'scatter', mode: 'lines+markers',
         name: series.label,
         x: points.x, y: points.y,
-        line: {width: 2.4, color: colorFor(seriesId)},
+        line: {width: 1.6, color: colorFor(seriesId)},
+        marker: {
+          size: 8,
+          color: colorFor(seriesId),
+          opacity: 1,
+          line: {color: '#08101f', width: 1.25}
+        },
         hovertemplate: latency
           ? '<b>%{fullData.name}</b><br>latency=%{x:.4g} ns<br>CDF=%{y:.1%}<extra></extra>'
           : '<b>%{fullData.name}</b><br>throughput=%{x:.4g}/s<br>CDF=%{y:.1%}<extra></extra>'
@@ -257,6 +344,13 @@ HTML_TEMPLATE = r"""<!doctype html>
         : (ordered[middle - 1] + ordered[middle]) / 2;
     }
 
+    function sortedSeriesEntries(series) {
+      return Object.entries(series).sort(([idA, itemA], [idB, itemB]) => {
+        const scoreDifference = itemB.bt_score - itemA.bt_score;
+        return scoreDifference || itemA.label.localeCompare(itemB.label) || idA.localeCompare(idB);
+      });
+    }
+
     function probabilityOfSuperiority(reference, candidate) {
       let wins = 0;
       let ties = 0;
@@ -288,6 +382,9 @@ HTML_TEMPLATE = r"""<!doctype html>
     const comparisonFamily = document.getElementById('comparison-family');
     const comparisonSize = document.getElementById('comparison-size');
     const comparisonReference = document.getElementById('comparison-reference');
+    const matrixProbability = document.getElementById('matrix-probability');
+    const matrixElo = document.getElementById('matrix-elo');
+    let matrixMode = 'probability';
 
     function refill(select, entries, preferred) {
       select.replaceChildren();
@@ -316,7 +413,10 @@ HTML_TEMPLATE = r"""<!doctype html>
 
     function syncReferences(initial = false) {
       const series = DATA[comparisonFamily.value][comparisonSize.value];
-      const entries = Object.entries(series).map(([id, item]) => [id, item.label]);
+      const entries = sortedSeriesEntries(series).map(([id, item]) => [
+        id,
+        `${item.label} · Elo ${item.elo_score >= 0 ? '+' : ''}${item.elo_score.toFixed(0)}`
+      ]);
       let reference = comparisonReference.value;
       if (initial) {
         const preferred = Object.entries(series).find(
@@ -329,38 +429,60 @@ HTML_TEMPLATE = r"""<!doctype html>
     }
 
     function renderHeatmap(family, size, series) {
-      const entries = Object.entries(series);
+      const entries = sortedSeriesEntries(series);
       const labels = entries.map(([, item]) => item.label);
-      const matrix = entries.map(([candidateId, candidate]) =>
+      const probabilityMatrix = entries.map(([candidateId, candidate]) =>
         entries.map(([referenceId, reference]) =>
           candidateId === referenceId
             ? 0.5
             : probabilityOfSuperiority(reference, candidate)
         )
       );
-      const text = matrix.map(row => row.map(value => `${(value * 100).toFixed(1)}%`));
+      const eloMatrix = entries.map(([, candidate]) =>
+        entries.map(([, reference]) => candidate.elo_score - reference.elo_score)
+      );
+      const customdata = entries.map(([, candidate], candidateIndex) =>
+        entries.map(([, reference], referenceIndex) => [
+          candidate.bt_score,
+          reference.bt_score,
+          candidate.elo_score,
+          reference.elo_score,
+          probabilityMatrix[candidateIndex][referenceIndex]
+        ])
+      );
+      const probabilityMode = matrixMode === 'probability';
+      const matrix = probabilityMode ? probabilityMatrix : eloMatrix;
+      const text = probabilityMode
+        ? matrix.map(row => row.map(value => `${(value * 100).toFixed(1)}%`))
+        : matrix.map(row => row.map(value => `${value >= 0 ? '+' : ''}${value.toFixed(0)}`));
+      const eloExtent = Math.max(...eloMatrix.flat().map(Math.abs), 1);
       const trace = {
         type: 'heatmap',
         x: labels,
         y: labels,
         z: matrix,
         text,
+        customdata,
         texttemplate: '%{text}',
         textfont: {color: '#f8fafc'},
-        zmin: 0,
-        zmax: 1,
-        zmid: 0.5,
+        zmin: probabilityMode ? 0 : -eloExtent,
+        zmax: probabilityMode ? 1 : eloExtent,
+        zmid: probabilityMode ? 0.5 : 0,
         colorscale: [[0, RED], [0.5, '#334155'], [1, GREEN]],
-        colorbar: {title: {text: 'P(candidate faster)'}, tickformat: '.0%'},
-        hovertemplate: '<b>candidate</b> %{y}<br><b>reference</b> %{x}<br>P(candidate faster)=%{z:.2%}<extra></extra>'
+        colorbar: probabilityMode
+          ? {title: {text: 'P(candidate faster)'}, tickformat: '.0%'}
+          : {title: {text: 'Candidate − reference Elo'}},
+        hovertemplate: probabilityMode
+          ? '<b>candidate</b> %{y}<br>Elo=%{customdata[2]:.1f}<br><b>reference</b> %{x}<br>Elo=%{customdata[3]:.1f}<br>P(candidate faster)=%{z:.2%}<extra></extra>'
+          : '<b>candidate</b> %{y}<br>Elo=%{customdata[2]:.1f}<br><b>reference</b> %{x}<br>Elo=%{customdata[3]:.1f}<br>candidate − reference Elo=%{z:.1f}<br>empirical P(candidate faster)=%{customdata[4]:.2%}<extra></extra>'
       };
       const layout = {
         ...BASE_LAYOUT,
         height: Math.max(680, labels.length * 88 + 300),
         margin: {l: 300, r: 100, t: 82, b: 210},
-        title: {text: `${family} · ${Number(size).toLocaleString()} entries · probability of superiority`},
-        xaxis: {title: {text: 'Reference run (A)'}, side: 'bottom', tickangle: -35},
-        yaxis: {title: {text: 'Candidate run (B)'}, autorange: 'reversed'}
+        title: {text: `${family} · ${Number(size).toLocaleString()} entries · ${probabilityMode ? 'empirical probability of superiority' : 'Bradley–Terry Elo difference'} · highest score → lowest`},
+        xaxis: {title: {text: 'Reference run (A) · highest BT score → lowest'}, side: 'bottom', tickangle: -35},
+        yaxis: {title: {text: 'Candidate run (B) · highest BT score → lowest'}, autorange: 'reversed'}
       };
       Plotly.react('pairwise-heatmap', [trace], layout, CONFIG);
     }
@@ -371,7 +493,7 @@ HTML_TEMPLATE = r"""<!doctype html>
       const table = document.createElement('table');
       table.className = 'summary';
       const header = table.createTHead().insertRow();
-      for (const label of ['Candidate vs selected reference', 'P(improvement)', 'Median log improvement', 'Median speedup']) {
+      for (const label of ['Candidate vs selected reference', 'Bradley–Terry score', 'Elo', 'P(improvement)', 'Median log improvement', 'Median speedup']) {
         const cell = document.createElement('th');
         cell.textContent = label;
         header.appendChild(cell);
@@ -380,6 +502,8 @@ HTML_TEMPLATE = r"""<!doctype html>
       for (const row of rows) {
         const cells = [
           row.label,
+          row.btScore.toFixed(5),
+          `${row.elo >= 0 ? '+' : ''}${row.elo.toFixed(1)}`,
           `${(row.probability * 100).toFixed(2)}%`,
           row.medianLog.toFixed(5),
           `${row.medianSpeedup.toFixed(4)}×`
@@ -398,20 +522,20 @@ HTML_TEMPLATE = r"""<!doctype html>
       const reference = series[referenceId];
       const rows = [];
       const traces = [];
-      for (const [candidateId, candidate] of Object.entries(series)) {
+      for (const [candidateId, candidate] of sortedSeriesEntries(series)) {
         if (candidateId === referenceId) continue;
         const stats = pairwiseEffects(reference, candidate);
         const effects = sortedNumbers(stats.effects);
         const cumulative = effects.map((_, index) => (index + 0.5) / effects.length);
-        rows.push({label: candidate.label, ...stats});
+        rows.push({label: candidate.label, btScore: candidate.bt_score, elo: candidate.elo_score, ...stats});
         traces.push({
-          type: 'scatter',
+          type: 'scattergl',
           mode: 'lines',
           name: `${candidate.label} · P=${(stats.probability * 100).toFixed(1)}% · median I=${stats.medianLog.toFixed(4)} · ${stats.medianSpeedup.toFixed(3)}×`,
           x: effects,
           y: cumulative,
           customdata: effects.map(value => Math.exp(value)),
-          line: {width: 2.5, color: colorFor(candidateId)},
+          line: {width: 2, color: colorFor(candidateId)},
           hovertemplate: '<b>%{fullData.name}</b><br>log(reference/candidate)=%{x:.6f}<br>multiplicative speedup=%{customdata:.5f}×<br>empirical CDF=%{y:.2%}<extra></extra>'
         });
       }
@@ -468,6 +592,16 @@ HTML_TEMPLATE = r"""<!doctype html>
       const size = comparisonSize.value;
       renderEffectDistributions(family, size, DATA[family][size]);
     });
+    for (const [button, mode] of [[matrixProbability, 'probability'], [matrixElo, 'elo']]) {
+      button.addEventListener('click', () => {
+        matrixMode = mode;
+        matrixProbability.classList.toggle('active', mode === 'probability');
+        matrixElo.classList.toggle('active', mode === 'elo');
+        const family = comparisonFamily.value;
+        const size = comparisonSize.value;
+        renderHeatmap(family, size, DATA[family][size]);
+      });
+    }
   </script>
 </body>
 </html>

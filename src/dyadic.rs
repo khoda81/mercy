@@ -77,6 +77,27 @@ impl BigDyadic {
             }
         }
 
+        Self::from_canonical(numerator, fractional_bits)
+    }
+
+    /// Construct an already-reduced positive dyadic fraction.
+    ///
+    /// The numerator must be odd and the value must lie in `(0, 1]`. This
+    /// crate-private entry point lets multiplication candidates that establish
+    /// those facts by construction skip a redundant trailing-zero scan.
+    pub(crate) fn from_reduced_odd(numerator: BigUint, fractional_bits: usize) -> Self {
+        assert!(numerator.bits() != 0, "reduced numerator must be positive");
+        assert!(numerator.bit(0), "reduced numerator must be odd");
+        let numerator_bits = numerator.bits() as usize;
+        assert!(
+            (fractional_bits == 0 && numerator_bits == 1)
+                || (fractional_bits != 0 && numerator_bits <= fractional_bits),
+            "BigDyadic must lie in (0, 1]"
+        );
+        Self::from_canonical(numerator, fractional_bits)
+    }
+
+    fn from_canonical(numerator: BigUint, fractional_bits: usize) -> Self {
         let width = fractional_bits
             .checked_add(1)
             .expect("BigDyadic bit width overflowed usize");
@@ -207,6 +228,14 @@ mod tests {
         let half = BigDyadic::from_scaled(BigUint::from(128u16), 8);
         assert_eq!(half.fractional_bits(), 1);
         assert_eq!(half.numerator(), BigUint::from(1u8));
+    }
+
+    #[test]
+    fn reduced_odd_constructor_matches_canonicalization() {
+        assert_eq!(
+            BigDyadic::from_reduced_odd(BigUint::from(3u8), 3),
+            BigDyadic::from_scaled(BigUint::from(6u8), 4)
+        );
     }
 
     #[test]

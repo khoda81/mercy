@@ -1,7 +1,7 @@
 use mercy::{
     prefix::implementations::{
-        self, batch_balanced, online_balanced, scalar, widening_u128, ALL_IMPLEMENTATIONS, DEFAULT,
-        PERFORMANCE_CANDIDATES,
+        self, batch_balanced, histogram_powers, histogram_primes, online_balanced, scalar,
+        size_adaptive, widening_u128, ALL_IMPLEMENTATIONS, DEFAULT, PERFORMANCE_CANDIDATES,
     },
     BigDyadic, RankedPrefix,
 };
@@ -31,10 +31,13 @@ fn tail_candidates_are_public_and_default_to_the_measured_winner() {
     assert_eq!(online_balanced::compute(prefix), expected);
     assert_eq!(batch_balanced::compute(prefix), expected);
     assert_eq!(widening_u128::compute(prefix), expected);
+    assert_eq!(histogram_powers::compute(prefix), expected);
+    assert_eq!(histogram_primes::compute(prefix), expected);
+    assert_eq!(size_adaptive::compute(prefix), expected);
     assert_eq!(implementations::compute(prefix), expected);
     assert_eq!(DEFAULT.name, "online-balanced");
-    assert_eq!(PERFORMANCE_CANDIDATES.len(), 3);
-    assert_eq!(ALL_IMPLEMENTATIONS.len(), 4);
+    assert_eq!(PERFORMANCE_CANDIDATES.len(), 6);
+    assert_eq!(ALL_IMPLEMENTATIONS.len(), 7);
 }
 
 #[test]
