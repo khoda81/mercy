@@ -101,7 +101,7 @@ pub trait Coder {
     ///
     /// This operation is observational and does not advance or restrict the
     /// coder.
-    fn locate(&self, prefix: RankedPrefix<'_>) -> usize;
+    fn locate(&self, prefix: &RankedPrefix) -> usize;
 
     /// Restrict the coder to the interval described by `denied` and `accepted`.
     ///
@@ -112,5 +112,5 @@ pub trait Coder {
     ///
     /// Implementations may emit any bytes whose values become irrevocably fixed
     /// by this restriction.
-    fn zoom(&mut self, denied: RankedPrefix<'_>, accepted: RankedPrefix<'_>) -> Self::Output;
+    fn zoom(&mut self, denied: &RankedPrefix, accepted: &RankedPrefix) -> Self::Output;
 }

@@ -18,3 +18,7 @@ criterion = { version = "0.8", features = ["html_reports"] }
 [[bench]]
 name = "tail_probability"
 harness = false
+
+[[bench]]
+name = "dyadic_multiply"
+harness = false

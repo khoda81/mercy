@@ -119,7 +119,7 @@ impl BigDyadic {
     /// Exact multiplication.
     ///
     /// Dyadic multiplication is just integer multiplication plus addition of
-    /// denominator exponents; [`Self::from_scaled`] then removes any common
+    /// denominator exponents; the internal `from_scaled` constructor then removes any common
     /// powers of two.
     pub fn multiplied(&self, rhs: &Self) -> Self {
         let numerator = self.numerator() * rhs.numerator();

@@ -31,6 +31,13 @@ Stored probabilities are in `[0, 1)`, not `(0, 1]`:
 
 Every finite tail therefore remains strictly positive by construction.
 
+`RankedPrefix` is a transparent dynamically sized wrapper over `[u8]`.
+Borrowing and ownership therefore live in `&RankedPrefix`,
+`&mut RankedPrefix`, and `Box<RankedPrefix>`; model construction and resizing
+remain ordinary `Vec<u8>` operations. Slice and box conversions are zero-copy,
+and range indexing preserves the nominal prefix type for coder calls such as
+`coder.zoom(&dist[..i], &dist[i..j])`.
+
 ## Why no categorical type?
 
 Every categorical boundary is already the tail event of a prefix. If
@@ -105,7 +112,10 @@ contract they cannot safely keep.
 
 ```bash
 cargo bench --bench tail_probability
+cargo bench --bench dyadic_multiply
 ```
 
-The Criterion suite measures exact tail computation across zero, maximum,
-half, and patterned inputs from tiny prefixes through 50k entries.
+The Criterion suites measure exact tail computation on one deterministic mixed
+distribution and exact equal-precision `BigDyadic` multiplication. Both cover
+models from 8 through 200,000 probability entries. Optimization hypotheses and
+results belong in the [experiment notebook](experiments/README.md).

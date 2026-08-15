@@ -157,11 +157,19 @@ This weak contract is important: it permits integer rounding, delayed output,
 different representative choices, and future coder-specific optimizations
 without silently breaking a stronger algebraic expectation.
 
-## 6. Current optimization target
+## 6. Current benchmark targets
 
-The first benchmark target is `RankedPrefix::tail_probability`. Criterion covers
-prefix lengths up to 50k and probability patterns chosen to exercise identity
-factors, worst-case odd factors, easy powers of two, and mixed data.
+The first benchmark target is `RankedPrefix::tail_probability`. Criterion uses
+one deterministic mixed-byte distribution at prefix lengths from 8 through
+200k so iteration stays focused and comparable.
+
+The second target is exact `BigDyadic` multiplication, using equal-size values
+derived from deterministic prefix tails. This is the next real operation needed
+to form zoom boundaries such as `D * A`.
+
+Speculative implementation work and its results belong in the `experiments/`
+lab notebook. The durable Criterion suite should continue to prefer public
+operations over implementation-specific diagnostics.
 
 Arithmetic coder implementations should be added only after the exact prefix
 boundary primitive and its benchmarks are stable. They can then be compared
