@@ -65,18 +65,25 @@ uv run experiments/plot_results.py
 
 The Plotly report embeds its JavaScript and every recorded sample in
 `artifacts/benchmark-report/index.html`, so the result remains usable offline.
-Its latency and throughput ECDFs show every available run. The pairwise panel
-has selectors for operation, input size, and a reference run. It shows a full
-candidate-by-reference matrix of the empirical probability that candidate
-latency is lower, counting ties as one half. A toggle switches the same matrix
-to signed candidate-minus-reference Elo differences derived from a
-Bradley-Terry fit; both modes are ordered by Bradley-Terry strength. Below that,
-every other candidate is compared with the selected reference using all
-cross-pair effects `log(reference / candidate)`, so negative values are
-regressions and positive values are improvements. The WebGL ECDF keeps every
-effect point but omits markers for responsive interaction. The legend and
-summary table report probability of improvement, Bradley-Terry/Elo scores,
-median log improvement, and median multiplicative speedup.
+The pairwise panel comes first, with selectors for operation, input size, and a
+reference run. It shows a full candidate-by-reference matrix of the empirical
+probability that candidate latency is lower, counting ties as one half. A toggle
+switches the same matrix to signed candidate-minus-reference Elo differences
+derived from a Bradley-Terry fit; both modes are ordered by Bradley-Terry
+strength. Below that, every other candidate is compared with the selected
+reference using all cross-pair effects `log(reference / candidate)`, so negative
+values are regressions and positive values are improvements. The WebGL ECDF
+keeps every effect point but omits markers for responsive interaction. The
+legend and summary table report probability of improvement,
+Bradley-Terry/Elo scores, median log improvement, and median multiplicative
+speedup.
+
+The all-run section then plots median latency, median throughput, and
+Bradley-Terry Elo against entry count for every recorded run. Entry count and
+the two performance values use logarithmic axes; the latency axis is reversed
+so faster results are higher. Elo is relative to the candidates available for a
+given operation and scale, so use it to inspect rank and crossover behavior
+rather than as an absolute performance measurement across different pools.
 
 The `n×m` cross-pairs are an empirical effect-size distribution, not `n×m`
 independent observations. The report fits no parametric distribution or KDE,

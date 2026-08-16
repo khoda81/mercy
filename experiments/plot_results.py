@@ -182,6 +182,7 @@ HTML_TEMPLATE = r"""<!doctype html>
     .plot { min-height: 550px; }
     #pairwise-heatmap { min-height: 680px; }
     #effect-distribution { min-height: 680px; }
+    #scaling-elo { grid-column: 1 / -1; }
     .note { margin: 6px 0 0; color: #94a3b8; font-size: 14px; }
     .summary { width: 100%; margin-top: 14px; border-collapse: collapse; font-variant-numeric: tabular-nums; }
     .summary th, .summary td { padding: 9px 12px; border-bottom: 1px solid #334155; text-align: right; }
@@ -192,13 +193,7 @@ HTML_TEMPLATE = r"""<!doctype html>
 </head>
 <body>
   <h1>Mercy empirical benchmark report</h1>
-  <p>Every line uses Criterion's recorded sampled batches directly. No normal, log-normal, KDE, or other latency/throughput sampling distribution is fitted. The pairwise matrix uses a Bradley–Terry fit only to rank the empirical win counts.</p>
-
-  <section class="card">
-    <h2>All-run empirical distributions</h2>
-    <p>Every available run is visible for the selected operation size. Throughput increases to the right. The latency axis is reversed so lower latency—and therefore better performance—is farther to the right.</p>
-    <div id="distribution-sections"></div>
-  </section>
+  <p>Every value comes from Criterion's recorded sampled batches directly. No normal, log-normal, KDE, or other latency/throughput sampling distribution is fitted. The pairwise matrix uses a Bradley–Terry fit only to rank the empirical win counts.</p>
 
   <section class="card">
     <h2>Pairwise benchmark improvement</h2>
@@ -216,6 +211,19 @@ HTML_TEMPLATE = r"""<!doctype html>
     <div id="effect-distribution" class="plot"></div>
     <div id="effect-summary"></div>
     <p class="note">Each curve contains all cross-pair effects for one candidate against the selected reference. Those <code>n×m</code> values describe an empirical effect-size distribution; they are not claimed to be <code>n×m</code> independent samples. Bradley–Terry scores are used only as a descriptive global ranking; no independence-based uncertainty or significance is claimed. No fitted latency distribution, KDE, or Q-Q score is used.</p>
+  </section>
+
+  <section class="card">
+    <h2>All-run scaling across entries</h2>
+    <p>Every recorded run is shown across its available input scales. Each point is the median of the recorded Criterion sample batches at that scale. Both performance plots use logarithmic entry and value axes; latency is reversed so faster results are higher. Elo is relative to the contenders available at each operation and scale, so its curve is most useful for comparing rank and crossover behavior rather than absolute performance.</p>
+    <div class="controls">
+      <label>Operation<select id="scaling-family"></select></label>
+    </div>
+    <div class="grid">
+      <div id="scaling-throughput" class="plot"></div>
+      <div id="scaling-latency" class="plot"></div>
+      <div id="scaling-elo" class="plot"></div>
+    </div>
   </section>
 
   <script>
@@ -238,12 +246,6 @@ HTML_TEMPLATE = r"""<!doctype html>
       return [...values].sort((a, b) => a - b);
     }
 
-    function cdf(values) {
-      const x = sortedNumbers(values);
-      const n = x.length;
-      return {x, y: x.map((_, index) => (index + 0.5) / n)};
-    }
-
     function colorFor(seriesId) {
       const allIds = [];
       for (const sizes of Object.values(DATA)) {
@@ -253,87 +255,11 @@ HTML_TEMPLATE = r"""<!doctype html>
       return COLORS[unique.indexOf(seriesId) % COLORS.length];
     }
 
-    function distributionTrace(seriesId, series, metric) {
-      const points = cdf(series[metric]);
-      const latency = metric === 'latency';
-      return {
-        type: 'scatter', mode: 'lines+markers',
-        name: series.label,
-        x: points.x, y: points.y,
-        line: {width: 1.6, color: colorFor(seriesId)},
-        marker: {
-          size: 8,
-          color: colorFor(seriesId),
-          opacity: 1,
-          line: {color: '#08101f', width: 1.25}
-        },
-        hovertemplate: latency
-          ? '<b>%{fullData.name}</b><br>latency=%{x:.4g} ns<br>CDF=%{y:.1%}<extra></extra>'
-          : '<b>%{fullData.name}</b><br>throughput=%{x:.4g}/s<br>CDF=%{y:.1%}<extra></extra>'
-      };
-    }
-
-    function distributionLayout(family, size, metric) {
-      const latency = metric === 'latency';
-      return {
-        ...BASE_LAYOUT,
-        title: {text: `${family} · ${Number(size).toLocaleString()} entries · ${latency ? 'latency' : 'throughput'} ECDF`},
-        xaxis: {
-          title: {text: latency ? 'Latency per operation (ns, log; lower is farther right)' : 'Throughput per second (log; higher is farther right)'},
-          type: 'log', autorange: latency ? 'reversed' : true, gridcolor: '#253247'
-        },
-        yaxis: {title: {text: 'Empirical cumulative probability'}, range: [0, 1], tickformat: '.0%', gridcolor: '#253247'}
-      };
-    }
-
-    function renderDistribution(family, size, metric, elementId) {
-      const series = DATA[family][size];
-      const traces = Object.entries(series).map(([id, item]) => distributionTrace(id, item, metric));
-      Plotly.react(elementId, traces, distributionLayout(family, size, metric), CONFIG);
-    }
-
     function addOption(select, value, label) {
       const option = document.createElement('option');
       option.value = value;
       option.textContent = label;
       select.appendChild(option);
-    }
-
-    function buildDistributionSections() {
-      const host = document.getElementById('distribution-sections');
-      for (const family of Object.keys(DATA)) {
-        const section = document.createElement('section');
-        section.className = 'card';
-        const title = document.createElement('h2');
-        title.textContent = family;
-        const controls = document.createElement('div');
-        controls.className = 'controls';
-        const label = document.createElement('label');
-        label.textContent = 'Entries';
-        const select = document.createElement('select');
-        const sizes = Object.keys(DATA[family]).sort((a, b) => Number(a) - Number(b));
-        for (const size of sizes) addOption(select, size, Number(size).toLocaleString());
-        select.value = sizes.includes('50000') ? '50000' : sizes[0];
-        label.appendChild(select);
-        controls.appendChild(label);
-        const grid = document.createElement('div');
-        grid.className = 'grid';
-        const latency = document.createElement('div');
-        const throughput = document.createElement('div');
-        latency.className = throughput.className = 'plot';
-        const slug = family.toLowerCase().replace(/[^a-z0-9]+/g, '-');
-        latency.id = `${slug}-latency`;
-        throughput.id = `${slug}-throughput`;
-        grid.append(latency, throughput);
-        section.append(title, controls, grid);
-        host.appendChild(section);
-        const update = () => {
-          renderDistribution(family, select.value, 'latency', latency.id);
-          renderDistribution(family, select.value, 'throughput', throughput.id);
-        };
-        select.addEventListener('change', update);
-        update();
-      }
     }
 
     function median(values) {
@@ -342,6 +268,110 @@ HTML_TEMPLATE = r"""<!doctype html>
       return ordered.length % 2
         ? ordered[middle]
         : (ordered[middle - 1] + ordered[middle]) / 2;
+    }
+
+    function scaleSeries(family) {
+      const grouped = new Map();
+      const sizes = Object.keys(DATA[family]).sort((a, b) => Number(a) - Number(b));
+      for (const size of sizes) {
+        for (const [seriesId, series] of Object.entries(DATA[family][size])) {
+          if (!grouped.has(seriesId)) {
+            grouped.set(seriesId, {seriesId, label: series.label, points: []});
+          }
+          grouped.get(seriesId).points.push({
+            entries: Number(size),
+            latency: median(series.latency),
+            throughput: median(series.throughput),
+            elo: series.elo_score,
+            sampleCount: series.latency.length
+          });
+        }
+      }
+      return [...grouped.values()].sort((a, b) =>
+        a.label.localeCompare(b.label) || a.seriesId.localeCompare(b.seriesId)
+      );
+    }
+
+    function scaleTrace(item, metric) {
+      const y = item.points.map(point => point[metric]);
+      const customdata = item.points.map(point => [
+        point.latency,
+        point.throughput,
+        point.elo,
+        point.sampleCount
+      ]);
+      const valueLine = metric === 'latency'
+        ? 'median latency=%{customdata[0]:.5g} ns'
+        : metric === 'throughput'
+          ? 'median throughput=%{customdata[1]:.5g}/s'
+          : 'Bradley–Terry Elo=%{customdata[2]:+.1f}';
+      return {
+        type: 'scatter',
+        mode: 'lines+markers',
+        name: item.label,
+        x: item.points.map(point => point.entries),
+        y,
+        customdata,
+        connectgaps: false,
+        line: {width: 1.8, color: colorFor(item.seriesId)},
+        marker: {
+          size: 8,
+          color: colorFor(item.seriesId),
+          opacity: 1,
+          line: {color: '#08101f', width: 1.25}
+        },
+        hovertemplate: `<b>%{fullData.name}</b><br>entries=%{x:,.0f}<br>${valueLine}<br>Criterion batches=%{customdata[3]:.0f}<extra></extra>`
+      };
+    }
+
+    function scaleLayout(family, metric) {
+      const latency = metric === 'latency';
+      const throughput = metric === 'throughput';
+      const title = latency ? 'median latency' : throughput ? 'median throughput' : 'Bradley–Terry Elo';
+      const entryScales = Object.keys(DATA[family])
+        .map(Number)
+        .sort((a, b) => a - b);
+      const yaxis = {
+        title: {
+          text: latency
+            ? 'Median latency per operation (ns, log; faster is higher)'
+            : throughput
+              ? 'Median throughput per second (log; higher is better)'
+              : 'Bradley–Terry Elo (higher is better)'
+        },
+        gridcolor: '#253247'
+      };
+      if (latency || throughput) yaxis.type = 'log';
+      if (latency) yaxis.autorange = 'reversed';
+      if (!latency && !throughput) {
+        yaxis.zeroline = true;
+        yaxis.zerolinecolor = '#94a3b8';
+      }
+      return {
+        ...BASE_LAYOUT,
+        height: 620,
+        uirevision: family,
+        title: {text: `${family} · ${title} across input scale`},
+        xaxis: {
+          title: {text: 'Entries (log scale)'},
+          type: 'log',
+          tickmode: 'array',
+          tickvals: entryScales,
+          ticktext: entryScales.map(value => value.toLocaleString()),
+          gridcolor: '#253247'
+        },
+        yaxis,
+        legend: {orientation: 'h', y: -0.22}
+      };
+    }
+
+    function renderScalingDashboard() {
+      const family = scalingFamily.value;
+      const items = scaleSeries(family);
+      for (const metric of ['throughput', 'latency', 'elo']) {
+        const traces = items.map(item => scaleTrace(item, metric));
+        Plotly.react(`scaling-${metric}`, traces, scaleLayout(family, metric), CONFIG);
+      }
     }
 
     function sortedSeriesEntries(series) {
@@ -384,6 +414,7 @@ HTML_TEMPLATE = r"""<!doctype html>
     const comparisonReference = document.getElementById('comparison-reference');
     const matrixProbability = document.getElementById('matrix-probability');
     const matrixElo = document.getElementById('matrix-elo');
+    const scalingFamily = document.getElementById('scaling-family');
     let matrixMode = 'probability';
 
     function refill(select, entries, preferred) {
@@ -581,12 +612,15 @@ HTML_TEMPLATE = r"""<!doctype html>
       renderEffectDistributions(family, size, series);
     }
 
-    buildDistributionSections();
     const families = compatibleFamilies();
     refill(comparisonFamily, families.map(family => [family, family]), families.includes('Tail probability') ? 'Tail probability' : families[0]);
     syncComparisonSizes(true);
+    const scalingFamilies = Object.keys(DATA);
+    refill(scalingFamily, scalingFamilies.map(family => [family, family]), scalingFamilies.includes('Tail probability') ? 'Tail probability' : scalingFamilies[0]);
+    renderScalingDashboard();
     comparisonFamily.addEventListener('change', () => syncComparisonSizes(false));
     comparisonSize.addEventListener('change', () => syncReferences(false));
+    scalingFamily.addEventListener('change', renderScalingDashboard);
     comparisonReference.addEventListener('change', () => {
       const family = comparisonFamily.value;
       const size = comparisonSize.value;

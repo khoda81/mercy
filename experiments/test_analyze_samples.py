@@ -5,7 +5,7 @@ from analyze_samples import (
     cross_pair_log_improvements,
     probability_of_superiority,
 )
-from plot_results import bradley_terry_scores, elo_rating, operation_parts
+from plot_results import HTML_TEMPLATE, bradley_terry_scores, elo_rating, operation_parts
 
 
 class EmpiricalComparisonTests(unittest.TestCase):
@@ -58,6 +58,16 @@ class EmpiricalComparisonTests(unittest.TestCase):
         self.assertEqual(elo_rating(1.0), 0.0)
         self.assertAlmostEqual(elo_rating(10.0), 400.0)
         self.assertAlmostEqual(elo_rating(0.1), -400.0)
+
+    def test_pairwise_precedes_scale_curves_without_duplicate_cdfs(self) -> None:
+        self.assertLess(
+            HTML_TEMPLATE.index("Pairwise benchmark improvement"),
+            HTML_TEMPLATE.index("All-run scaling across entries"),
+        )
+        self.assertNotIn("All-run empirical distributions", HTML_TEMPLATE)
+        self.assertNotIn('id="distribution-sections"', HTML_TEMPLATE)
+        for plot_id in ("scaling-throughput", "scaling-latency", "scaling-elo"):
+            self.assertIn(f'id="{plot_id}"', HTML_TEMPLATE)
 
 
 if __name__ == "__main__":
