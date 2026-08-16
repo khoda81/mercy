@@ -128,9 +128,7 @@ pub fn infer_dimensions(id: &str) -> (String, String, String) {
     match parts.as_slice() {
         [] => (String::new(), String::new(), "default".into()),
         [only] => ((*only).into(), "default".into(), "default".into()),
-        [family, scale] if is_scale(scale) => {
-            ((*family).into(), "default".into(), (*scale).into())
-        }
+        [family, scale] if is_scale(scale) => ((*family).into(), "default".into(), (*scale).into()),
         _ if is_scale(parts[parts.len() - 1]) => {
             let candidate = parts[parts.len() - 2].to_owned();
             let family = parts[..parts.len() - 2].join("/");
