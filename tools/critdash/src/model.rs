@@ -133,12 +133,12 @@ pub fn infer_dimensions(id: &str) -> (String, String, String) {
             let candidate = parts[parts.len() - 2].to_owned();
             let family = parts[..parts.len() - 2].join("/");
             let scale = parts[parts.len() - 1].to_owned();
-            (family, candidate.into(), scale.into())
+            (family, candidate, scale)
         }
         _ => {
             let candidate = parts[parts.len() - 1].to_owned();
             let family = parts[..parts.len() - 1].join("/");
-            (family, candidate.into(), "default".into())
+            (family, candidate, "default".into())
         }
     }
 }
@@ -149,7 +149,7 @@ fn is_scale(value: &str) -> bool {
 
 #[cfg(test)]
 mod tests {
-    use super::infer_dimensions;
+    use super::{infer_dimensions, Benchmark, CargoCriterionMessage};
 
     #[test]
     fn infers_mercy_shape() {
@@ -177,5 +177,30 @@ mod tests {
             infer_dimensions("fib/20"),
             ("fib".to_owned(), "default".to_owned(), "20".to_owned())
         );
+    }
+
+    #[test]
+    fn parses_cargo_criterion_benchmark_complete_shape() {
+        let message: CargoCriterionMessage = serde_json::from_str(
+            r#"{
+                "reason":"benchmark-complete",
+                "id":"tail/flat/online-balanced/4096",
+                "report_directory":"target/criterion/reports/example",
+                "iteration_count":[30,60],
+                "measured_values":[124200.0,246000.0],
+                "unit":"ns",
+                "throughput":[{"per_iteration":4096,"unit":"elements"}],
+                "typical":{"estimate":4120.0,"lower_bound":4100.0,"upper_bound":4140.0,"unit":"ns"},
+                "mean":{"estimate":4125.0,"lower_bound":4105.0,"upper_bound":4145.0,"unit":"ns"},
+                "median":{"estimate":4115.0,"lower_bound":4095.0,"upper_bound":4135.0,"unit":"ns"},
+                "median_abs_dev":{"estimate":10.0,"lower_bound":8.0,"upper_bound":12.0,"unit":"ns"}
+            }"#,
+        )
+        .unwrap();
+        let benchmark = Benchmark::from_message(message).unwrap();
+        assert_eq!(benchmark.samples_per_iteration, vec![4140.0, 4100.0]);
+        assert_eq!(benchmark.family, "tail/flat");
+        assert_eq!(benchmark.candidate, "online-balanced");
+        assert_eq!(benchmark.scale, "4096");
     }
 }
