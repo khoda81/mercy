@@ -1,0 +1,104 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>critdash</title>
+  <script src="https://cdn.plot.ly/plotly-3.0.1.min.js"></script>
+  <style>
+    :root { color-scheme: dark; font-family: Inter, ui-sans-serif, system-ui, sans-serif; background:#090d18; color:#e5e7eb; }
+    * { box-sizing: border-box; }
+    body { margin:0 auto; max-width:1600px; padding:24px; }
+    h1 { margin:0; color:#a3e635; font-size:30px; }
+    h2 { margin:0 0 8px; font-size:19px; }
+    p { color:#9fb0c7; line-height:1.5; }
+    code { color:#67e8f9; }
+    .top { display:flex; justify-content:space-between; gap:16px; align-items:flex-start; flex-wrap:wrap; margin-bottom:18px; }
+    .status { color:#94a3b8; font-size:13px; padding-top:8px; }
+    .card { background:#111827; border:1px solid #334155; border-radius:14px; padding:18px; margin:16px 0; box-shadow:0 12px 32px rgb(0 0 0 / 20%); }
+    .controls { display:flex; flex-wrap:wrap; gap:12px; margin:12px 0 4px; }
+    label { display:grid; gap:5px; color:#94a3b8; font-size:12px; }
+    select { min-width:180px; background:#0f172a; color:#e5e7eb; border:1px solid #475569; border-radius:8px; padding:8px 28px 8px 10px; }
+    .grid { display:grid; grid-template-columns:repeat(auto-fit,minmax(min(620px,100%),1fr)); gap:16px; }
+    .plot { min-height:520px; }
+    table { width:100%; border-collapse:collapse; font-variant-numeric:tabular-nums; }
+    th, td { text-align:right; padding:8px 10px; border-bottom:1px solid #243244; }
+    th:first-child, td:first-child { text-align:left; }
+    th { color:#94a3b8; font-size:12px; }
+    td { font-size:13px; }
+    .muted { color:#94a3b8; }
+    .good { color:#86efac; }
+    .bad { color:#fca5a5; }
+    .pill { display:inline-block; border:1px solid #475569; border-radius:999px; padding:5px 9px; margin-right:6px; font-size:12px; color:#cbd5e1; }
+    @media (max-width:720px) { body { padding:12px; } .card { padding:12px; } .plot { min-height:410px; } select { min-width:145px; } }
+  </style>
+</head>
+<body>
+  <div class="top">
+    <div>
+      <h1>critdash</h1>
+      <p style="margin:5px 0 0">Empirical Criterion comparisons. Heatmap cells are cross-sample probability of superiority; effect curves are distributions of <code>log(reference / candidate)</code>.</p>
+    </div>
+    <div id="status" class="status">connecting…</div>
+  </div>
+
+  <section class="card">
+    <h2>Comparison</h2>
+    <div class="controls">
+      <label>Run scope<select id="run-scope"></select></label>
+      <label>Benchmark family / scale<select id="group"></select></label>
+      <label>Reference<select id="reference"></select></label>
+    </div>
+    <p id="context" class="muted"></p>
+  </section>
+
+  <div class="grid">
+    <section class="card">
+      <h2>Probability of superiority</h2>
+      <div id="heatmap" class="plot"></div>
+      <p class="muted">Rows are candidates; columns are references. A cell is <code>P(row latency &lt; column latency)</code>, with ties worth 0.5. This is an empirical effect size, not confidence.</p>
+    </section>
+    <section class="card">
+      <h2>Log improvement distributions</h2>
+      <div id="effects" class="plot"></div>
+      <p class="muted">Positive means the candidate is faster than the selected reference. Cross-pairs describe the empirical effect distribution; they are not treated as independent observations.</p>
+    </section>
+  </div>
+
+  <section class="card">
+    <h2>Candidate summary</h2>
+    <p><span class="pill">Borda = mean empirical superiority</span><span class="pill">BT/Elo = descriptive one-dimensional fit</span><span class="pill">Residual = empirical − BT prediction</span></p>
+    <div style="overflow:auto"><table id="summary"></table></div>
+  </section>
+
+<script>
+const COLORS = ['#22d3ee','#f472b6','#a3e635','#fbbf24','#c084fc','#fb7185','#60a5fa','#34d399','#f97316','#2dd4bf'];
+const LAYOUT = {template:'plotly_dark',paper_bgcolor:'rgba(0,0,0,0)',plot_bgcolor:'#0b1220',font:{color:'#dbe4f0'},margin:{l:90,r:25,t:35,b:95},hovermode:'closest'};
+const CONFIG = {responsive:true,displaylogo:false};
+let DATA={runs:[]};
+let selection={scope:'recent2',group:null,reference:null};
+const $=id=>document.getElementById(id);
+function esc(text){return String(text).replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));}
+function sigmoid(x){return 1/(1+Math.exp(-Math.max(-30,Math.min(30,x))));}
+function mean(xs){return xs.length?xs.reduce((a,b)=>a+b,0)/xs.length:NaN;}
+function median(xs){if(!xs.length)return NaN;const s=[...xs].sort((a,b)=>a-b),m=Math.floor(s.length/2);return s.length%2?s[m]:(s[m-1]+s[m])/2;}
+function seriesLabel(run,b){return `${run.label} · ${b.candidate}`;}
+function groupKey(b){return `${b.family}\u001f${b.scale}`;}
+function groupLabel(b){return b.scale==='default'?b.family:`${b.family} · ${Number.isFinite(Number(b.scale))?Number(b.scale).toLocaleString():b.scale}`;}
+function scopedRuns(){const runs=[...DATA.runs].sort((a,b)=>a.started_at_unix_ms-b.started_at_unix_ms);if(selection.scope==='all')return runs;if(selection.scope==='latest')return runs.slice(-1);if(selection.scope==='recent2')return runs.slice(-2);return runs.filter(r=>r.id===selection.scope);}
+function allSeries(){const out=[];for(const run of scopedRuns())for(const b of Object.values(run.benchmarks||{}))out.push({run,b,key:`${run.id}\u001f${b.id}`,label:seriesLabel(run,b)});return out;}
+function pairwise(candidate,reference){let better=0,worse=0,ties=0;const effects=[];for(const c of candidate.b.samples_per_iteration)for(const r of reference.b.samples_per_iteration){if(c<r)better++;else if(c>r)worse++;else ties++;effects.push(Math.log(r/c));}const total=better+worse+ties;effects.sort((a,b)=>a-b);const p=(better+.5*ties)/total;return {p,regression:(worse+.5*ties)/total,ties:ties/total,effects,medianLog:median(effects),medianRatio:Math.exp(median(effects))};}
+function fitBradleyTerry(series,matrix){const n=series.length,theta=Array(n).fill(0);if(n<2)return theta;for(let step=0;step<1500;step++){const grad=Array(n).fill(0);for(let i=0;i<n;i++)for(let j=i+1;j<n;j++){const empirical=matrix[i][j],predicted=sigmoid(theta[i]-theta[j]),error=empirical-predicted;grad[i]+=error;grad[j]-=error;}const rate=.08/Math.max(1,n-1);for(let i=0;i<n;i++)theta[i]=Math.max(-8,Math.min(8,theta[i]+rate*grad[i]));const center=mean(theta);for(let i=0;i<n;i++)theta[i]-=center;}return theta;}
+function add(select,value,text){const o=document.createElement('option');o.value=value;o.textContent=text;select.appendChild(o);}
+function currentSeries(){return allSeries().filter(s=>groupKey(s.b)===selection.group);}
+function rebuildControls(){const runs=[...DATA.runs].sort((a,b)=>a.started_at_unix_ms-b.started_at_unix_ms),scope=$('run-scope'),previous=selection.scope;scope.replaceChildren();[['recent2','Latest + previous'],['latest','Latest run'],['all','All runs']].forEach(([v,t])=>add(scope,v,t));for(const r of runs)add(scope,r.id,r.label);scope.value=[...scope.options].some(o=>o.value===previous)?previous:(runs.length>1?'recent2':'latest');selection.scope=scope.value;const series=allSeries(),groups=new Map();for(const s of series){const key=groupKey(s.b);if(!groups.has(key))groups.set(key,groupLabel(s.b));}const group=$('group'),old=selection.group;group.replaceChildren();[...groups.entries()].sort((a,b)=>a[1].localeCompare(b[1],undefined,{numeric:true})).forEach(([v,t])=>add(group,v,t));if(old&&groups.has(old))group.value=old;selection.group=group.value||null;rebuildReference();}
+function rebuildReference(){const series=currentSeries(),ref=$('reference'),old=selection.reference;ref.replaceChildren();series.forEach(s=>add(ref,s.key,s.label));if(old&&series.some(s=>s.key===old))ref.value=old;else if(series.length)ref.value=series[0].key;selection.reference=ref.value||null;render();}
+function render(){const series=currentSeries();$('status').textContent=`${DATA.runs.length} run${DATA.runs.length===1?'':'s'} · live`;if(!series.length){Plotly.purge('heatmap');Plotly.purge('effects');$('summary').innerHTML='';$('context').textContent='No comparable benchmark series yet.';return;}const unit=series[0].b.unit;$('context').textContent=`${series.length} series · ${unit} per iteration · ${series[0].b.samples_per_iteration.length} Criterion batch estimates in first series`;const n=series.length,matrix=Array.from({length:n},()=>Array(n).fill(.5)),detail=Array.from({length:n},()=>Array(n));for(let i=0;i<n;i++)for(let j=0;j<n;j++){if(i===j){detail[i][j]={p:.5,effects:[0],medianRatio:1,medianLog:0};continue;}detail[i][j]=pairwise(series[i],series[j]);matrix[i][j]=detail[i][j].p;}const labels=series.map(s=>s.label);Plotly.react('heatmap',[{type:'heatmap',z:matrix,x:labels,y:labels,zmin:0,zmax:1,zmid:.5,colorscale:[[0,'#ef4444'],[.5,'#111827'],[1,'#22c55e']],text:matrix.map(row=>row.map(p=>(p*100).toFixed(1)+'%')),texttemplate:'%{text}',hovertemplate:'candidate=%{y}<br>reference=%{x}<br>P(candidate faster)=%{z:.1%}<extra></extra>',colorbar:{title:'P(faster)',tickformat:'.0%'}}],{...LAYOUT,xaxis:{tickangle:-35},yaxis:{autorange:'reversed'},margin:{l:160,r:40,t:25,b:150}},CONFIG);const refIndex=Math.max(0,series.findIndex(s=>s.key===selection.reference)),traces=[];let color=0;for(let i=0;i<n;i++)if(i!==refIndex){const effects=detail[i][refIndex].effects,y=effects.map((_,k)=>(k+.5)/effects.length),p=detail[i][refIndex].p,ratio=detail[i][refIndex].medianRatio;traces.push({type:'scatter',mode:'lines',x:effects,y,name:`${series[i].label} · P=${(p*100).toFixed(1)}% · median ${ratio.toFixed(3)}×`,line:{width:2.5,color:COLORS[color++%COLORS.length]},hovertemplate:'log improvement=%{x:.4f}<br>speed ratio=%{customdata:.3f}×<br>CDF=%{y:.1%}<extra></extra>',customdata:effects.map(Math.exp)});}Plotly.react('effects',traces,{...LAYOUT,xaxis:{title:'log(reference / candidate)'},yaxis:{title:'Empirical CDF',range:[0,1],tickformat:'.0%'},shapes:[{type:'line',x0:0,x1:0,y0:0,y1:1,xref:'x',yref:'paper',line:{color:'#e5e7eb',dash:'dash',width:1.5}}],legend:{orientation:'h',y:-.22}},CONFIG);const theta=fitBradleyTerry(series,matrix),elo=theta.map(t=>t*400/Math.log(10)),borda=matrix.map((row,i)=>mean(row.filter((_,j)=>j!==i))),residual=matrix.map((row,i)=>Math.sqrt(mean(row.map((p,j)=>j===i?0:(p-sigmoid(theta[i]-theta[j]))**2).filter((_,j)=>j!==i)))),rows=series.map((s,i)=>({s,i,borda:borda[i],elo:elo[i],residual:residual[i],vsRef:detail[i][refIndex]})).sort((a,b)=>b.borda-a.borda);$('summary').innerHTML='<thead><tr><th>Series</th><th>Mean superiority</th><th>BT Elo</th><th>BT RMS residual</th><th>vs reference</th><th>Median speed ratio</th></tr></thead><tbody>'+rows.map(r=>{const d=r.vsRef,cls=d.p>.5?'good':d.p<.5?'bad':'';return `<tr><td>${esc(r.s.label)}</td><td>${(r.borda*100).toFixed(1)}%</td><td>${r.elo.toFixed(0)}</td><td>${(r.residual*100).toFixed(1)} pp</td><td class="${cls}">${(d.p*100).toFixed(1)}%</td><td class="${d.medianRatio>1?'good':d.medianRatio<1?'bad':''}">${d.medianRatio.toFixed(3)}×</td></tr>`;}).join('')+'</tbody>';}
+async function refresh(){try{DATA=await fetch('/api/state',{cache:'no-store'}).then(r=>r.json());rebuildControls();}catch(error){$('status').textContent=`error: ${error}`;}}
+$('run-scope').addEventListener('change',e=>{selection.scope=e.target.value;rebuildControls();});
+$('group').addEventListener('change',e=>{selection.group=e.target.value;rebuildReference();});
+$('reference').addEventListener('change',e=>{selection.reference=e.target.value;render();});
+const events=new EventSource('/events');events.onmessage=()=>refresh();events.onopen=()=>{$('status').textContent='connected';};events.onerror=()=>{$('status').textContent='reconnecting…';};refresh();
+</script>
+</body>
+</html>
