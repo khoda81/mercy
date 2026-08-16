@@ -150,10 +150,13 @@ async fn api_state(State(state): State<AppState>) -> Json<DashboardState> {
 }
 
 async fn events(State(state): State<AppState>) -> impl IntoResponse {
-    let stream = BroadcastStream::new(state.updates.subscribe()).filter_map(|message| match message {
-        Ok(()) => Some(Ok::<Event, std::convert::Infallible>(Event::default().data("state"))),
-        Err(_) => None,
-    });
+    let stream =
+        BroadcastStream::new(state.updates.subscribe()).filter_map(|message| match message {
+            Ok(()) => Some(Ok::<Event, std::convert::Infallible>(
+                Event::default().data("state"),
+            )),
+            Err(_) => None,
+        });
     Sse::new(stream).keep_alive(KeepAlive::default())
 }
 
@@ -180,8 +183,13 @@ async fn run_criterion(
         "critdash: running cargo criterion --message-format=json {}",
         passthrough.join(" ")
     );
-    let mut child = command.spawn().context("failed to launch `cargo criterion`")?;
-    let stdout = child.stdout.take().context("cargo-criterion stdout unavailable")?;
+    let mut child = command
+        .spawn()
+        .context("failed to launch `cargo criterion`")?;
+    let stdout = child
+        .stdout
+        .take()
+        .context("cargo-criterion stdout unavailable")?;
     let mut lines = BufReader::new(stdout).lines();
 
     while let Some(line) = lines.next_line().await? {
@@ -216,7 +224,10 @@ async fn new_run(label: Option<&str>) -> Run {
     let revision = command_output("git", &["rev-parse", "--short", "HEAD"]);
     let project = std::env::current_dir()
         .ok()
-        .and_then(|path| path.file_name().map(|name| name.to_string_lossy().into_owned()))
+        .and_then(|path| {
+            path.file_name()
+                .map(|name| name.to_string_lossy().into_owned())
+        })
         .unwrap_or_else(|| "project".into());
     let default_label = if revision != "unavailable" {
         revision.clone()
@@ -246,7 +257,11 @@ fn machine_description() -> String {
                 .find_map(|line| line.strip_prefix("model name\t: ").map(str::to_owned))
         })
         .unwrap_or_else(|| "unknown cpu".into());
-    format!("{} {} · {cpu}", std::env::consts::OS, std::env::consts::ARCH)
+    format!(
+        "{} {} · {cpu}",
+        std::env::consts::OS,
+        std::env::consts::ARCH
+    )
 }
 
 fn command_output(program: &str, args: &[&str]) -> String {
